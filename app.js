@@ -500,11 +500,13 @@
   deskG.id = 'desk-front';
   let lostNights = 0; try { lostNights = +localStorage.getItem('vigil.lost') || 0; } catch (e) {}
   // The lost-night pieces (design.md, sleep is the exit): one more thing for every night lost, in a fixed order,
-  // kept forever, never announced. 1 the mug's handle turned the other way; 2 `last` shows a login on a night not
-  // played yet; 3 a hidden file in ~ from M.; 4 burn-in on the tube, readable with the brightness down; 5 a note
-  // on Pong's sticker; 6 "don't trust the red" scratched into DEFRAG's recess; 7 a polaroid (with the polaroids);
-  // 8 `ping <your name>` answers.
+  // kept forever, never announced. 1 `last` shows a login on a night not played yet; 2 a hidden file in ~ from M.;
+  // 3 burn-in on the tube, readable with the brightness down; 4 and 5 open (the writing on Pong's sticker and in
+  // DEFRAG's recess, parked below); 6 the ceiling-tile polaroid (not built); 7 `ping <your name>` answers; 8 open.
   const piece = n => lostNights >= n;
+  // Parked, not cut (Arnold, 2026-10-02): the written clues, "it lets / you win." in pencil on Pong's sticker and
+  // "don't trust / the red" scratched into DEFRAG's recess, kept for atmosphere later. Off, their slots left open.
+  const WRITING_PARKED = true;
   // (the file drawer, the right pedestal's lowest, is drawn live in its own groups, first: its opening, its inside
   // clipped to it, its outside, its front)
   deskG.innerHTML = deskDrawer.desk({ pedestal: true, tally: lostNights, fileFront: false })
@@ -524,8 +526,8 @@
   // order the night hands them over: PONG is there from the start, the rest turn up during the night
   const CARTS = Object.fromEntries(['PONG', 'DEFRAG', 'ROUTE', 'COOLANT', 'HEAP', 'POWER', 'FIREWALL', 'SCAN'].map((c, slot) => [c, { slot }]));
   const tray = { travel: 0, carts: [{ slot: 0, label: 'PONG', lift: 0 }],
-    notes: piece(4) ? { PONG: 'it lets you win.' } : {},
-    scratch: piece(5) ? { slot: 1, lines: ["don't trust", 'the red'] } : null };
+    notes: !WRITING_PARKED && piece(4) ? { PONG: 'it lets you win.' } : {},
+    scratch: !WRITING_PARKED && piece(5) ? { slot: 1, lines: ["don't trust", 'the red'] } : null };
   let drawerBusy = false;
   function drawDrawer() {
     const r = deskDrawer.render(tray);
@@ -957,7 +959,7 @@
   const LIPS = { x: 26, y: 74, z: CAM.f / 2.5, tilt: .52, roll: -.02, yaw: .18 };
   const TIP  = { x: 22, y: 62, z: CAM.f / 2.65, tilt: .86, roll: -.02, yaw: .18 };
   function showMug(p) {
-    const r = mug3d.render(turned(p), room.coffee);
+    const r = mug3d.render(p, room.coffee);
     mug3dG.innerHTML = r.svg;
     steamRig.style.transform = `translate(${(r.rimFar.x - 1296).toFixed(1)}px, ${(r.rimFar.y - 756).toFixed(1)}px) scale(${r.rimFar.k.toFixed(3)})`;
   }
@@ -968,7 +970,6 @@
     mug.style.transform = `translate(${(cx - REST_CENTER[0]).toFixed(2)}px, ${(cy - REST_CENTER[1]).toFixed(2)}px) rotate(${((p.roll - REST.roll) * 180 / Math.PI).toFixed(3)}deg) scale(${k.toFixed(4)})`;
   }
   const sip = createSipTimeline({ REST, LIPS, TIP });
-  const turned = p => p;                     // (the turned handle, once a lost-night piece, was cut: Arnold, 2026-10-02)
   mug.addEventListener('click', () => {
     if (sipping) return;
     hint.classList.add('gone');
@@ -2758,18 +2759,26 @@
 
     // ---- how a cartridge game ends: a card on the tube in the game's own box. The title in inverse video (green
     // won, amber lost) flashes in with a few notes, then what it came to comes up line by line, then any key.
-    // lines: [label, value, cls?]. Returns { key, cancel }; done() runs on a key once the card has settled.
-    function resultCard({ head, won, title, lines: rows, foot }, done) {
+    // lines: [label, value, cls?], or { centre: [[text, cls?], ...] } for a line set in the middle. finale: steps run
+    // after the lines are up and before the card settles, one a tick (null waits a tick); each gets set(i, line) to
+    // change line i. Returns { key, cancel }; done() runs on a key once the card has settled.
+    function resultCard({ head, won, title, lines: rows, foot, finale = [] }, done) {
       playtest(`game over: ${title || head || ''} ${won ? 'WON' : 'lost'}`);
       const IN = 48, bar = '+' + '-'.repeat(IN) + '+';
       const pad = t => t + ' '.repeat(Math.max(0, IN - [...t].length));
       const plain = (t = '') => ({ html: '|' + esc(pad(t)) + '|' });
       const spaced = title.toUpperCase().split('').join(' ');
       const centred = ' '.repeat(Math.floor((IN - spaced.length) / 2)) + spaced;
-      const body = [plain(), null, plain(), ...rows.map(([k, v, cls]) => {
-        const lead = '    ' + k.padEnd(11);
+      const line = r => {
+        if (r.centre) {
+          const len = r.centre.reduce((n, [t]) => n + [...t].length, 0), l = Math.floor((IN - len) / 2);
+          return { html: '|' + esc(' '.repeat(l)) + r.centre.map(([t, c]) => c ? `<span class="${c}">${esc(t)}</span>` : esc(t)).join('') + esc(' '.repeat(IN - l - len)) + '|' };
+        }
+        const [k, v, cls] = r, lead = '    ' + k.padEnd(11);
         return cls ? { html: '|' + esc(lead) + `<span class="${cls}">${esc(v)}</span>` + esc(' '.repeat(Math.max(0, IN - lead.length - v.length))) + '|' } : plain(lead + v);
-      }), plain()];
+      };
+      const body = [plain(), null, plain(), ...rows.map(line), plain()];
+      const set = (j, r) => { body[3 + j] = line(r); };
       let shown = 0, lit = true, ready = false, i = 0;
       const draw = () => {
         const banner = { html: '|' + (lit ? `<span class="${won ? 'rs-won' : 'rs-lost'}">${esc(pad(centred))}</span>` : esc(pad(''))) + '|' };
@@ -2783,8 +2792,9 @@
       notes.forEach((f, j) => setTimeout(() => beep(f, j === notes.length - 1 ? .22 : .09, .03), j * 95));
       const steps = [() => { shown = 2; }, () => { lit = false; }, () => { lit = true; }, () => { lit = false; }, () => { lit = true; }];
       for (let j = 2; j < body.length + 1; j++) steps.push(() => { shown++; beep(1800, .012, .012); });
+      for (const f of finale) steps.push(f && (() => f(set)));
       steps.push(() => { ready = true; });
-      const t = setInterval(() => { steps[i++](); draw(); if (i >= steps.length) clearInterval(t); }, 90);
+      const t = setInterval(() => { steps[i++]?.(); draw(); if (i >= steps.length) clearInterval(t); }, 90);
       draw();
       return { key: () => { if (ready) done(); }, cancel: () => clearInterval(t) };
     }
@@ -2851,7 +2861,7 @@
           lines: [['unit', won ? `${u} back in service` : `${u} still stuck`, won ? 'ok' : 'alert'],
             ['files', `${whole} of ${d.sizes.length} whole`], ['time', won ? secs(took) : why], ['energy', energyDelta(e0)]],
           foot: won ? (handed.length ? 'someone sent you mail.' : 'the racks settle.') : 'it keeps writing.',
-        }, () => { stopProc(); for (const e of handed) showEvent(e); if (longest >= 15 && steadying) setTimeout(keyFromPong, 600); });
+        }, () => { stopProc(); for (const e of handed) showEvent(e); });
       };
       const timer = setInterval(() => {
         const now = performance.now();
@@ -3156,16 +3166,19 @@
       const W = 48, Hh = 11, PL = 3;
       let py = 4, cy = 4, bx = 24, by = 5, vx = 1, vy = .5, you = 0, cpu = 0, started = false, over = null, tick = 0;
       // a rally is the hits in one point, both paddles; the previous operator's best on this cart was 14
-      let rally = 0, longest = 0, card = null, best = 14, bestBy = 'm';
+      // The cart's high score is the goal, arcade style: HI 14 M on the start screen, and every card puts your own best
+      // beside it (YOU 9 · HI 14 M). Beat it and your score takes M.'s place on the card.
+      let rally = 0, longest = 0, card = null, best = 14, bestBy = 'm', mine = 0;
       const t0 = performance.now(), pongE0 = shift.energy;
-      try { best = +localStorage.getItem('nightshift.pongBest') || 14; bestBy = localStorage.getItem('nightshift.pongBestBy') || 'm'; } catch {}
+      try { best = +localStorage.getItem('nightshift.pongBest') || 14; bestBy = localStorage.getItem('nightshift.pongBestBy') || 'm'; mine = +localStorage.getItem('vigil.pongMine') || 0; } catch {}
+      const hiText = (hi, by) => `HI ${hi} ${(by || 'm')[0].toUpperCase()}`;
       // Once a night, in the first game, your paddle stops listening for about two seconds and returns the ball by
       // itself, perfectly; the arrow keys on the drawn keyboard go down on their own while it does. Lag, probably.
       // (design.md, story: night 1's small wrong things; it happens while your eyes are on the tube.)
       let possessed = 0;
       const haunt = !room.pongHaunted;
       // While M.'s key is still under the cart, the CPU steadies match by match (design.md: most players can't beat 14 on
-      // night 1, and "it lets you win."): from your second match it tracks the ball every tick, from the third it also
+      // night 1, so everyone gets there in the end): from your second match it tracks the ball every tick, from the third it also
       // sends it back without adding angle. Counted across nights; nothing says so.
       const steadying = file.key === 'none' && !file.unlocked;
       let matchN = 0; try { matchN = (+localStorage.getItem('vigil.pongMatches') || 0) + 1; } catch (e) {}
@@ -3177,9 +3190,12 @@
         for (let i = 0; i < PL; i++) { g[py + i][1] = '█'; g[cy + i][W - 2] = '█'; }
         const byi = clamp(Math.round(by), 0, Hh - 1);
         if (!over) g[byi][clamp(bx, 0, W - 1)] = '●';
+        if (!started) {                                  // the start screen, between the paddles
+          const put = (row, t) => { const l = Math.floor((W - t.length) / 2); for (let i = 0; i < t.length; i++) g[row][l + i] = t[i]; };
+          put(2, hiText(best, bestBy)); put(8, 'press up or down to serve');
+        }
         const border = '+' + '-'.repeat(W) + '+';
         frame = [{ text: ` pong   you ${you}   cpu ${cpu}   up/down, first to 5, q to quit`, cls: 'dim' }, border, ...g.map(r => '|' + r.join('') + '|'), border];
-        if (!started) { frame[6] = '|' + centerText('press up or down to serve', W) + '|'; frame[8] = '|' + centerText(`cart best: ${best} hits, ${bestBy}`, W) + '|'; }
         render();
       };
       const step = () => {
@@ -3205,7 +3221,7 @@
         if (you >= 5 || cpu >= 5) { end(you >= 5); return; }
         draw();
       };
-      if (window.dev) window.dev.game = { point: () => { you++; } };   // ?dev: score a point, for trying the ending
+      if (window.dev) window.dev.game = { point: () => { you++; }, rally: n => { longest = n; } };   // ?dev: score a point, set the longest rally, for trying the ending
       let handed = [];
       const end = won => {
         over = won ? 'you win' : 'cpu wins';
@@ -3214,14 +3230,23 @@
         shift.rest();                                    // a game of Pong is a short break, win or lose
         if (won) shift.paidBack(pongE0, shift.PONG_BREAK); // and a win pays for its minute
         updateVitals();
-        const record = longest > best;
-        if (record) { best = longest; bestBy = account.user; try { localStorage.setItem('nightshift.pongBest', String(best)); localStorage.setItem('nightshift.pongBestBy', bestBy); } catch {} }
+        const record = longest > best, was = hiText(best, bestBy);
+        mine = Math.max(mine, longest); try { localStorage.setItem('vigil.pongMine', String(mine)); } catch {}
+        if (record) { best = longest; bestBy = account.user; playtest(`pong: new high score, ${best}`); try { localStorage.setItem('nightshift.pongBest', String(best)); localStorage.setItem('nightshift.pongBestBy', bestBy); } catch {} }
+        // YOU · HI, the last line on the card; on a new best the old HI blinks out and yours takes its place
+        const ARCADE = 5, arcade = (hi, cls) => ({ centre: [[`YOU ${mine}`], ['  ·  ', 'dim'], [hi, cls]] });
+        const blink = on => set => set(ARCADE, arcade(on ? was : ' '.repeat(was.length)));
+        const finale = !record ? [] : [null, null, null, null, null, null,
+          blink(false), null, null, blink(true), null, null, blink(false), null, null, blink(true), null, null, blink(false), null, null, null,
+          set => { set(ARCADE, arcade(hiText(best, bestBy), 'ok')); [784, 1046, 1568].forEach((f, j) => setTimeout(() => beep(f, j === 2 ? .2 : .08, .03), j * 110)); },
+          null, null, null, null, null];
         card = resultCard({
           head: ' pong', won, title: won ? 'you win' : 'cpu wins',
-          lines: [['score', `${you} - ${cpu}`], ['longest', `${longest} hit${longest === 1 ? '' : 's'}`],
-            ['cart best', record ? `${best} hits, a new best` : `${best} hits, ${bestBy}`, record ? 'ok' : undefined], ['time', secs(performance.now() - t0)], ['energy', energyDelta(pongE0)]],
+          lines: [['score', `${you} - ${cpu}`], ['longest', `${longest} hit${longest === 1 ? '' : 's'}`], ['time', secs(performance.now() - t0)], ['energy', energyDelta(pongE0)],
+            { centre: [] }, arcade(was)],
+          finale,
           foot: handed.length ? 'someone sent you mail.' : won ? 'the cpu paddle waits a moment.' : 'it has had a lot of practice.',
-        }, () => { stopProc(); for (const e of handed) showEvent(e); });
+        }, () => { stopProc(); for (const e of handed) showEvent(e); if (longest >= 15 && steadying) setTimeout(keyFromPong, 600); });
       };
       const t = setInterval(step, 85);
       draw();

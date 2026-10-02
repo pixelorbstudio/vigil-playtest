@@ -89,8 +89,7 @@ window.createMug3D = function createMug3D({ f = 1500, px = 720, py = 813 } = {})
   /* pose: { x, y, z } camera-space position of the mug's centre (y down, z forward),
            tilt: radians, top of the mug toward the viewer; roll: radians about the view axis;
            yaw: radians about the mug's own axis. Returns { svg, rimFar: {x, y, k} } */
-  // only: draw one group ('handle': the handle alone, for the drawn mug turned round)
-  function render(pose, level = 1, { outline = 1, only = null } = {}) {
+  function render(pose, level = 1, { outline = 1 } = {}) {
     const { x: X, y: Y, z: Z, tilt = 0, roll = 0, yaw = 0 } = pose;
     const empty = level <= .01;
     const COFFEE_Y = COFFEE_FLOOR + (COFFEE_FULL - COFFEE_FLOOR) * Math.max(0, Math.min(1, level));
@@ -169,12 +168,6 @@ window.createMug3D = function createMug3D({ f = 1500, px = 720, py = 813 } = {})
     items.sort((a, b) => (GROUP_ORDER[a.group] - GROUP_ORDER[b.group]) || (b.depth - a.depth));
     const drawn = new Uint8Array(F.length);
     let out = '';
-    if (only) {
-      const polys = items.filter(it => it.group === only).map(it => it.pts.map(i => P[i][0].toFixed(1) + ',' + P[i][1].toFixed(1)).join(' '));
-      const under = polys.map(p => `<polygon points="${p}" fill="${OUTLINE}" stroke="${OUTLINE}" stroke-width="${2 * outline}" stroke-linejoin="round"/>`).join('');
-      const over = items.filter(it => it.group === only).map((it, k) => `<polygon points="${polys[k]}" fill="${it.fill}" stroke="${it.fill}" stroke-width="1" stroke-linejoin="round"/>`).join('');
-      return { svg: under + over, rimFar: null };
-    }
     for (const it of items) {
       out += `<polygon points="${it.pts.map(i => P[i][0].toFixed(1) + ',' + P[i][1].toFixed(1)).join(' ')}" fill="${it.fill}" stroke="${it.fill}" stroke-width="1" stroke-linejoin="round"/>`;
       for (const fi of it.faces) drawn[fi] = 1;
@@ -196,7 +189,7 @@ window.createMug3D = function createMug3D({ f = 1500, px = 720, py = 813 } = {})
       if (lines) out += `<path d="${lines}" stroke="${OUTLINE}" stroke-width="${outline}" stroke-linecap="round" fill="none"/>`;
     }
     // the rings, on the side of the body that faces the eye
-    for (const rg of only ? [] : [LIP, FOOT]) {
+    for (const rg of [LIP, FOOT]) {
       let d = '', on = false;
       for (let i = 0; i <= N; i++) {
         const vi = rg[i % N], a = (i % N) / N * 2 * Math.PI;
