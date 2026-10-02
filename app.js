@@ -696,7 +696,9 @@
     const t0 = file.travel;
     await fileTween(DM.open.ms, u => { file.travel = t0 + (1 - t0) * DM.open.travel(u); });
     file.busy = false;
-    setTimeout(() => glenn.once('file-key', "Where'd you get that, chief?"), 2000);
+    // Glenn never wanted it found (design.md, Glenn and the opened drawer): damage control, played down. While you look
+    // through it he says nothing about it, and never mentions M.'s folder.
+    glenn.once('file-open', "That's just old paperwork, chief. HR's been meaning to clear it out.");
   }
   async function closeFile() {
     if (!file.open) return;
@@ -705,6 +707,9 @@
     drawerSound(false, DM.close.ms);
     await fileTween(DM.close.ms, u => { file.travel = DM.close.travel(u); });
     file.busy = false;
+    // the first close: an order, and the closing is the compliance, logged under his line (it shows in night 3's grep)
+    const said = glenn.once('file-close', 'Be a pal and put everything back the way you found it.');
+    if (said) { glenn.order('file-back', 'be a pal and put everything back the way you found it'); said.then(() => glenn.complied('file-back')); }
   }
   fileFront.addEventListener('pointerdown', e => {
     e.preventDefault();
@@ -856,6 +861,8 @@
     });
     file.turn = 1;
     glenn.broke('file');
+    // the only time he is genuinely surprised: he didn't know the key existed
+    glenn.once('file-key', "Where'd you get that, chief?");
     keepFile();
     // and the drawer comes out a little, with the drawer's knock
     await wait(160);
@@ -1652,7 +1659,8 @@
       let at = 0;                                        // heard, not seen: his keys, upstairs, at his pace
       for (let i = 0; i < t.length; i++) { const ch = t[i]; setTimeout(() => key(ch, MUFFLED), at); at += pace(ch, t[i + 1]); }
     }
-    function once(k, ...texts) { if (taught.has(k)) return false; remember(k); say(...texts); return true; }
+    // false if said before; otherwise the promise of his saying it (truthy, so it reads as "said")
+    function once(k, ...texts) { if (taught.has(k)) return false; remember(k); return say(...texts); }
     // the start of the night: an introduction the first time, a welcome back after that
     // one arrival pending at a time: a logout cancels the last operator's
     function arriveIn(ms) { clearTimeout(arrivalTimer); arrivalTimer = setTimeout(arrive, ms); }
