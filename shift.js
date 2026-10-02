@@ -287,6 +287,8 @@
     }
     function find(cart) { if (s.found.has(cart)) return null; const events = []; reveal(cart, 'dev', events); return events[0]; }
     function useBean() { if (s.beans <= 0) return false; s.beans--; return true; }
+    // beans in (a delivery, Glenn's bag): the page plays the tube's chirp for it (app.js giveBeans)
+    function addBeans(n = 1) { s.beans += n; return s.beans; }
 
     const uptime = () => 1 - s.stats.downMin / (TOTAL_UNITS * Math.max(s.t, 1e-9));
     function report() {
@@ -304,7 +306,7 @@
       skip: t => { s.t = Math.max(s.t, t); s.open.clear(); },
       // no new trouble for the next realMs (the page, while Glenn is typing)
       hush: realMs => { s.hushUntil = Math.max(s.hushUntil, s.t + realMs * perMs); },
-      tick, fix, finish, failed, won, poke, rest, paidBack, drainFactor, defragDial, routeDial, drink, spend, setStrain, useBean, inject, find, clock, uptime, report,
+      tick, fix, finish, failed, won, poke, rest, paidBack, drainFactor, defragDial, routeDial, drink, spend, setStrain, useBean, addBeans, inject, find, clock, uptime, report,
       get t() { return s.t; }, get over() { return s.over; }, get ending() { return s.ending; },
       get strikes() { return s.strikes; }, get energy() { return s.energy; }, get beans() { return s.beans; },
       found: cart => s.found.has(cart), foundAt: cart => s.found.get(cart) ?? null, startsWith: NIGHT.start, initial: () => initial.slice(),

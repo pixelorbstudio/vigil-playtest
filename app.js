@@ -1282,6 +1282,22 @@
     const g = ctx.createGain(); g.gain.setValueAtTime(vol, t); g.gain.exponentialRampToValueAtTime(.001, t + dur);
     o.connect(g).connect(ctx.destination); o.start(t); o.stop(t + dur);
   }
+  // Beans in (Arnold, 2026-10-02): the PC speaker's little success chirp, from the tube, not a game's ding. Three quick
+  // notes rising, a square wave through a small speaker's band, 0.28 s. Level measured with the sound audit against the
+  // hum (design.md, "Beans in"); BEAN_CHIRP.gain is the one knob.
+  const BEAN_CHIRP = { gain: .012, notes: [[880, 0, .055], [1175, .07, .055], [1760, .14, .14]] };   // [Hz, start s, length s]
+  function beanChirp() {
+    if (muted) return;
+    const ctx = ac(), t0 = ctx.currentTime + .01;
+    const bp = ctx.createBiquadFilter(); bp.type = 'bandpass'; bp.frequency.value = 1800; bp.Q.value = .7;   // a small speaker: no lows, softened highs
+    const out = ctx.createGain(); out.gain.value = BEAN_CHIRP.gain; bp.connect(out).connect(ctx.destination);
+    for (const [hz, at, d] of BEAN_CHIRP.notes) {
+      const o = ctx.createOscillator(); o.type = 'square'; o.frequency.value = hz;
+      const g = ctx.createGain(), s = t0 + at;                // 4 ms in and 20 ms out, so no note clicks
+      g.gain.setValueAtTime(0, s); g.gain.linearRampToValueAtTime(1, s + .004); g.gain.setValueAtTime(1, s + d - .02); g.gain.linearRampToValueAtTime(0, s + d);
+      o.connect(g).connect(bp); o.start(s); o.stop(s + d + .01);
+    }
+  }
   // CRT power: a low "bwomp" collapsing down on off, a rising hum on warm-up
   function degauss(on) {
     if (muted) return;
@@ -2028,6 +2044,8 @@
     get shift() { return shift; }, ghost: () => ghostKey('m'), wake: () => { woke = true; wakeUp(); },
     skip: (t = 385) => { shift.skip(t); for (const u in UNITS) unitLed(u, null); },   // 385: 05:25
     // the file drawer: unlock it (as if the key had turned), file the photo, or put it all back as it was on night 1
+    beans: (n = 1) => giveBeans(n, 'dev'),           // beans in, with the chirp
+    chirp: () => beanChirp(),
     file: { unlock: () => { file.unlocked = true; file.key = 'lock'; keepFile(); drawFile(); }, keyToDesk: () => { file.key = 'desk'; keepFile(); drawDeskKey(); }, keyFromPong: () => keyFromPong(), fileIt: () => { file.filed = true; file.filedShift = shiftNo; keepFile(); drawFile(); }, nextShift: () => { shiftNo++; drawFile(); },
       reset: () => { Object.assign(file, { unlocked: false, filed: false, clicks: 0, travel: 0, open: false, key: 'none', turn: 1 }); keepFile(); drawFile(); drawDeskKey(); }, get state() { return { ...file }; } },
     look: rest => lookAt(rest),
@@ -2156,11 +2174,21 @@
 
   // the HUD: a status line top right of the terminal, energy and beans (and strikes, once there are any), drawn with the rest of the tube (crt.js)
   let energyTenth = 10;
+  // Every way beans come in goes through here (a delivery, Glenn's 02:00 bag, anything later): the count goes up, the
+  // tube chirps, and the count in the status line blinks once with it.
+  let beansLitUntil = 0;
+  function giveBeans(n = 1, why = '') {
+    shift.addBeans(n);
+    playtest(`beans +${n}${why ? ' (' + why + ')' : ''}: ${shift.beans}`);
+    beanChirp();
+    beansLitUntil = performance.now() + 260; updateVitals();
+    setTimeout(updateVitals, 280);
+  }
   function updateVitals() {
     const e = shift.energy;
     if (PLAYTEST && Math.floor(e * 10) !== energyTenth) { energyTenth = Math.floor(e * 10); playtest(`energy below ${(energyTenth + 1) * 10}%`); }
     // (the shift starts before the terminal exists; the first status is drawn once it does, below)
-    try { term.setStatus({ energy: e, beans: shift.beans, low: e < .3, strikes: shift.strikes, mail: { unread: inbox.unread() } }); } catch (err) { return; }
+    try { term.setStatus({ energy: e, beans: shift.beans, low: e < .3, strikes: shift.strikes, mail: { unread: inbox.unread() }, beansLit: performance.now() < beansLitUntil }); } catch (err) { return; }
     // tired: below 30% the screen softens, and below 25% the keys lag (see typeKey)
     termCanvas.style.filter = e < .3 ? `blur(${((.3 - e) / .3 * 1.1).toFixed(2)}px)` : '';
   }

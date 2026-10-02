@@ -92,7 +92,8 @@
     // curve, which lifts the top of the screen, does not press it against the bezel.
     // where the envelope was last drawn (design units), for the page's click
     let mailHit = null;
-    function drawStatus({ energy, beans, low, strikes = 0, mail = null }, pal) {
+    // beansLit: the bean and its count bright for a moment, the one blink when beans come in
+    function drawStatus({ energy, beans, low, strikes = 0, mail = null, beansLit = false }, pal) {
       const SF = 15, y = 22;                            // font size and the line's centre, in design units
       f.font = `${SF}px ${FAMILY}`;
       const w = t => f.measureText(t).width;
@@ -143,11 +144,11 @@
       f.fillStyle = low ? ink : pal.dim; f.fillText(pct, x, y); x += w(pct) + GAP * 2;
       // the bean, in the phosphor, its crease cut out so the glass shows through; as tall as the capitals, on them
       const by = gy + ch / 2, bh = ch / 2 + .5;
-      f.save(); f.fillStyle = pal.dim; f.beginPath(); f.ellipse(x + BEAN / 2, by, BEAN * .4, bh, 0, 0, Math.PI * 2); f.fill();
+      f.save(); f.fillStyle = beansLit ? pal.text : pal.dim; f.beginPath(); f.ellipse(x + BEAN / 2, by, BEAN * .4, bh, 0, 0, Math.PI * 2); f.fill();
       f.globalCompositeOperation = 'destination-out'; f.shadowBlur = 0; f.lineWidth = 1.3; f.lineCap = 'round';
       f.beginPath(); f.moveTo(x + BEAN * .56, by - bh * .9); f.bezierCurveTo(x + BEAN * .3, by - bh * .4, x + BEAN * .72, by + bh * .4, x + BEAN * .44, by + bh * .92); f.stroke();
       f.restore();
-      f.fillStyle = pal.dim; f.fillText(count, x + BEAN + 5, y);
+      f.fillStyle = beansLit ? pal.text : pal.dim; f.fillText(count, x + BEAN + 5, y);
       f.font = `${FONT}px ${FAMILY}`;
     }
     // A square grid over the text, for games that move in cells (snake): the text grid's cells are 2.4 times taller
