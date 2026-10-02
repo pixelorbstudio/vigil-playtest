@@ -1,0 +1,73 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Vigil Terminal</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="icon" href="data:,">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div id="stage">
+  <div id="night-over" hidden>
+    <p id="no-yet" hidden></p>
+    <p id="no-what"></p>
+    <p id="no-choices"><button id="no-reboot" type="button">reboot</button><button id="no-report" type="button">report</button></p>
+    <pre id="no-report-text" hidden></pre>
+  </div>
+  <div id="look">
+    <div id="scene-holder"></div>
+    <div id="terminal" aria-live="polite">
+      <div id="term-tube"><canvas id="term-canvas"></canvas></div>
+      <pre id="term-out" class="sr-only"></pre>
+    </div>
+    <svg id="overlay" viewBox="0 0 1440 1080" width="1440" height="1080" fill="none" xmlns="http://www.w3.org/2000/svg">
+      <defs>
+        <clipPath id="screen-clip"></clipPath>
+        <linearGradient id="glare-band-grad" x1="0" y1="0" x2="1" y2="0">
+          <stop offset="0"   stop-color="#fff" stop-opacity="0"/>
+          <stop offset=".5"  stop-color="#fff" stop-opacity="1"/>
+          <stop offset="1"   stop-color="#fff" stop-opacity="0"/>
+        </linearGradient>
+        <radialGradient id="glare-corner-grad">
+          <stop offset="0"  stop-color="#fff" stop-opacity="1"/>
+          <stop offset="1"  stop-color="#fff" stop-opacity="0"/>
+        </radialGradient>
+        <filter id="soft" x="-30%" y="-30%" width="160%" height="160%"><feGaussianBlur stdDeviation="9"/></filter>
+        <filter id="softer" x="-30%" y="-30%" width="160%" height="160%"><feGaussianBlur stdDeviation="22"/></filter>
+      </defs>
+      <!-- glare: a soft corner bloom plus two diagonal bands, clipped to the tube face -->
+      <g id="glass" clip-path="url(#screen-clip)"><g id="glare-move">
+        <ellipse class="glare" cx="410" cy="190" rx="300" ry="200" fill="url(#glare-corner-grad)" filter="url(#softer)" opacity=".13"/>
+        <rect class="glare" x="430" y="-60" width="150" height="820" fill="url(#glare-band-grad)" filter="url(#soft)" opacity=".05" transform="rotate(35 505 350)"/>
+        <rect class="glare" x="590" y="-60" width="46" height="820" fill="url(#glare-band-grad)" filter="url(#soft)" opacity=".09" transform="rotate(35 613 350)"/>
+      </g></g>
+      <g id="mug3d"></g>
+      <g id="steam-rig"><g id="steam" transform="translate(1296 756)">
+        <path class="wisp" style="--dx:-14px;--delay:0s"   d="M0 0c-8-18 8-34 0-52s6-34-2-52" />
+        <path class="wisp" style="--dx:2px;--delay:1.1s"   d="M0 0c6-16-8-32 0-50s-6-36 2-54" />
+        <path class="wisp" style="--dx:16px;--delay:2.2s"  d="M0 0c-6-20 6-30 0-48s8-38 0-56" />
+      </g></g>
+    </svg>
+  </div>
+</div>
+
+<div id="hud">
+  <span id="hint">start typing · try the knobs · sip the coffee</span>
+  <button id="hum" type="button" aria-pressed="false" title="Toggle the server room's ambient hum">hum: on</button>
+  <button id="mute" type="button" aria-pressed="false" title="Toggle key sounds">sound: on</button>
+  <button id="export" type="button" title="Save what happened, to send back" hidden>save playtest log</button>
+</div>
+
+<script src="mug3d.js"></script>
+<script src="hand.js"></script>
+<script src="solid.js"></script>
+<script src="key3d.js"></script>
+<script src="drawer.js"></script>
+<script src="shift.js"></script>
+<script src="defrag.js"></script>
+<script src="route.js"></script>
+<script src="crt.js"></script>
+<script src="app.js"></script>
+</body>
+</html>

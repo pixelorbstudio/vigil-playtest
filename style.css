@@ -1,0 +1,363 @@
+:root {
+  --bg: #f3f3f3;
+  --ink: #2a2a2a;
+  --term-text: #e9edff;
+  --term-dim: #aab4ee;
+}
+
+* { box-sizing: border-box; }
+
+html, body {
+  margin: 0;
+  height: 100%;
+  background: var(--bg);
+  overflow: hidden;
+  font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  color: var(--ink);
+}
+
+/* The stage is always 1440x1080 design units; JS scales it to fit. */
+#stage {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 1440px;
+  height: 1080px;
+  transform-origin: 0 0;
+  will-change: transform;
+  /* The drawing is Arnold's 1920 x 1080 frame; the game works in the 1440 in its middle (the frame's x 240..1680 is
+     stage x 0..1440). Clipped to the frame: top and bottom (looking down moves #look inside it), and 240 either side. */
+  clip-path: inset(0 -240px);
+}
+
+/* the head: looking down to the desk slides everything up inside the frame */
+#look {
+  position: absolute;
+  inset: 0;
+  width: 1440px;
+  height: 1080px;
+  will-change: transform;
+}
+
+#overlay {
+  position: absolute;
+  inset: 0;
+  width: 1440px;
+  height: 1080px;
+}
+
+/* the scene runs below the frame to the desk's drawer (looking down shows it), and 240 either side */
+/* Caveat (SIL OFL 1.1, assets/fonts/Caveat-OFL.txt): what is written on the polaroids' strips */
+@font-face { font-family: 'Caveat'; src: url('assets/fonts/caveat-latin-400-normal.woff2') format('woff2'); font-display: block; }
+
+#scene-holder {
+  position: absolute;
+  inset: 0 auto auto 0;
+  width: 1440px;
+  height: 2200px;
+}
+#scene-holder > svg {
+  position: absolute;
+  top: 0; left: -240px;
+  width: 1920px;
+  height: 2200px;
+}
+
+#overlay { pointer-events: none; }
+
+/* ---------- parallax layers ---------- */
+.layer {
+  transition: transform 80ms linear;
+  will-change: transform;
+}
+
+/* ---------- keys ---------- */
+.key {
+  cursor: pointer;
+  transition: transform 90ms cubic-bezier(.2,.8,.2,1), filter 90ms;
+}
+.key:hover { filter: brightness(1.03); }
+.key.pressed {
+  transform: translateY(6px);
+  filter: brightness(.93);
+  transition-duration: 40ms;
+}
+
+/* ---------- LEDs ---------- */
+.led {
+  animation: led-blink var(--dur, 2s) steps(1, end) var(--delay, 0s) infinite;
+  transition: fill 120ms;
+}
+.led.steady { animation: none; }
+.led.amber { fill: #F2C46B !important; }
+.led.burst { animation: led-burst 320ms steps(1, end) 0s 1; }
+/* one short, half-deep dip per cycle (it was two dips to a quarter) */
+@keyframes led-blink {
+  0%   { opacity: 1; }
+  88%  { opacity: 1; }
+  90%  { opacity: .5; }
+  95%  { opacity: 1; }
+  100% { opacity: 1; }
+}
+@keyframes led-burst {
+  0%   { opacity: .2; }
+  30%  { opacity: 1; }
+  50%  { opacity: .2; }
+  100% { opacity: 1; }
+}
+
+.power-led {
+  animation: power-pulse 2.8s ease-in-out infinite;
+}
+@keyframes power-pulse {
+  0%, 100% { opacity: 1; }
+  50%      { opacity: .55; }
+}
+
+/* ---------- steam ---------- */
+.wisp {
+  stroke: #b9b9b7;
+  stroke-width: 2;
+  stroke-linecap: round;
+  opacity: 0;
+  transform: translate(var(--dx), 0);
+  animation: wisp 3.6s ease-out var(--delay) infinite;
+}
+@keyframes wisp {
+  0%   { opacity: 0;   transform: translate(var(--dx), 8px) scale(.9); }
+  20%  { opacity: calc(.55 * var(--steam, 1)); }
+  70%  { opacity: calc(.25 * var(--steam, 1)); }
+  100% { opacity: 0;   transform: translate(calc(var(--dx) * 1.6), calc(-14px - 20px * var(--steam, 1))) scale(1.15); }
+}
+#steam { --steam: 1; }
+#steam.hot .wisp { animation-duration: 2.2s; stroke-width: 2.6; }
+
+/* ---------- terminal ---------- */
+#terminal {
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: 1320px;  /* twice the 660x413 virtual screen, for the barrel filter's sake; mapped onto the CRT by JS */
+  height: 826px;
+  transform-origin: 0 0;
+  will-change: transform;
+  pointer-events: none;
+}
+
+/* the tube: everything on the glass (the output and the status line) flickers, dims, powers off and warms up
+   together */
+#term-tube {
+  position: absolute;
+  inset: 0;
+  animation: crt-flicker 4s steps(1, end) infinite;
+  transform-origin: 50% 50%;
+  transition: filter .25s;
+}
+#terminal::before {
+  /* scanlines */
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: repeating-linear-gradient(
+    to bottom,
+    rgba(0, 0, 20, .10) 0px,
+    rgba(0, 0, 20, .10) 1px,
+    transparent 1px,
+    transparent 3px
+  );
+  pointer-events: none;
+  z-index: 1;
+}
+#terminal::after {
+  /* vignette */
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: radial-gradient(ellipse at center, transparent 60%, rgba(0, 0, 40, .28) 100%);
+  pointer-events: none;
+  z-index: 1;
+}
+@keyframes crt-flicker {
+  0%, 100% { opacity: 1; }
+  7%       { opacity: .97; }
+  8%       { opacity: 1; }
+  53%      { opacity: .985; }
+  54%      { opacity: 1; }
+}
+
+
+/* ---------- hud ---------- */
+#hud {
+  position: fixed;
+  z-index: 3;
+  right: 16px;
+  bottom: 14px;
+  display: flex;
+  gap: 14px;
+  align-items: center;
+  font-size: 12px;
+  letter-spacing: .04em;
+  color: #7a7a7a;
+}
+#hint {
+  transition: opacity .6s;
+  animation: hint-pulse 1.6s ease-in-out infinite;
+}
+#hint.gone { opacity: 0; animation: none; }
+@keyframes hint-pulse { 50% { opacity: .35; } }
+
+#mug { cursor: pointer; transform-box: view-box; transform-origin: 1298.5px 837px; will-change: transform, opacity; }
+/* the steam follows the rim of the 3D mug while sipping; its transform is scaled about its own base */
+#steam-rig { transform-box: view-box; transform-origin: 1296px 756px; will-change: transform; }
+#mug3d { shape-rendering: geometricPrecision; }
+#stage { transition: none; }
+#steam.puff .wisp { animation-duration: 1.6s; stroke-width: 2.8; }
+/* eyes on the mug: the screen goes soft while sipping */
+
+#mute, #hum, #export {
+  font: inherit;
+  color: inherit;
+  background: #fff;
+  border: 1px solid #cfcfcd;
+  border-radius: 999px;
+  padding: 5px 11px;
+  cursor: pointer;
+}
+#mute:hover, #hum:hover, #export:hover { border-color: #9a9a98; }
+#mute[aria-pressed="true"], #hum[aria-pressed="true"] { color: #b0b0ae; }
+#mute[aria-pressed="true"] { text-decoration: line-through; }
+
+@media (prefers-reduced-motion: reduce) {
+  .led, .wisp, #term-tube, #hint, .power-led { animation: none !important; }
+  .layer { transition: none; }
+}
+
+.glare { mix-blend-mode: screen; pointer-events: none; }
+
+
+/* LED states */
+.led.dead { opacity: .12 !important; animation: none !important; }
+.led.ping { opacity: 1 !important; animation: none !important; }
+.led.ping { fill: #d8ffe0 !important; }
+.power-led.off { opacity: .12 !important; animation: none !important; }
+.power-led { transition: opacity .3s; }
+
+/* ---------- monitor knobs ---------- */
+.knob { cursor: pointer; }
+.knob:hover { fill: #ffffff !important; }
+.knob.turning { fill: #ffffff !important; }
+.knob-mark { pointer-events: none; transition: transform .25s ease; }
+
+/* ---------- CRT power ---------- */
+#screen path:nth-of-type(2) { transition: fill .5s; }
+#screen.off path:nth-of-type(2) { fill: #161b3f; }
+#terminal.off #term-tube {
+  transform: scaleY(.004);
+  opacity: 0;
+  transition: transform .28s cubic-bezier(.7, 0, .9, .4), opacity .12s .26s;
+  animation: none;
+}
+#terminal.warm #term-tube { animation: warm 1.7s ease-out; }
+@keyframes warm {
+  0%   { transform: scaleY(.01); opacity: 0; }
+  25%  { transform: scaleY(1.03); opacity: .75; }
+  40%  { opacity: .35; }
+  55%  { transform: none; opacity: .9; }
+  70%  { opacity: .6; }
+  100% { transform: none; opacity: 1; }
+}
+
+/* ---------- meltdown glitch ---------- */
+#terminal.glitch #term-tube { animation: glitch .18s steps(2, end) infinite; }
+@keyframes glitch {
+  0%   { transform: translate(0, 0) skewX(0); filter: brightness(1) hue-rotate(0); }
+  20%  { transform: translate(-8px, 2px) skewX(4deg); filter: brightness(1.4) hue-rotate(40deg); }
+  40%  { transform: translate(6px, -3px) skewX(-6deg); filter: brightness(.6); }
+  60%  { transform: translate(-3px, 5px) skewX(2deg); filter: brightness(1.2) hue-rotate(-60deg); }
+  80%  { transform: translate(9px, 1px) skewX(-3deg); filter: brightness(.8) contrast(1.6); }
+  100% { transform: translate(0, -6px) skewX(0); filter: brightness(1); }
+}
+
+/* full-screen programs (top, snake) draw fixed frames: never wrap them */
+
+/* ---------- cartridge slot ---------- */
+.slot { cursor: pointer; }
+#cart { pointer-events: auto; }
+
+/* ---------- matrix ---------- */
+.mx0 { color: #f2fff4; text-shadow: 0 0 8px #d8ffe0, 0 0 2px #fff; }
+.mx1 { color: #b6ffc4; }
+.mx2 { color: #b6ffc4; opacity: .55; }
+.mx3 { color: #b6ffc4; opacity: .25; }
+.mxmsg { color: #ffffff; background: rgba(8, 20, 40, .85); text-shadow: 0 0 6px #fff; }
+
+/* an empty mug shakes its head */
+#mug.shake { animation: mug-shake .6s ease-in-out; }
+@keyframes mug-shake {
+  0%, 100% { transform: translateX(0); }
+  15%  { transform: translateX(-6px) rotate(-1.2deg); }
+  35%  { transform: translateX(6px) rotate(1.2deg); }
+  55%  { transform: translateX(-4px) rotate(-.8deg); }
+  75%  { transform: translateX(3px) rotate(.5deg); }
+}
+
+/* ---------- looking down: the frame edge toward the other rest ---------- */
+.look-zone { position: fixed; left: 0; right: 0; z-index: 2; }
+.look-zone.down { cursor: s-resize; }
+.look-zone.up { cursor: n-resize; }
+
+/* a cartridge carried between the drawer and the slot, drawn over everything */
+#hand, #key-flight { position: absolute; left: 0; top: 0; width: 1440px; height: 2200px; overflow: visible; pointer-events: none; }
+
+/* ---------- incidents on a unit's LED ---------- */
+.led.down { fill: #D2D2D0 !important; animation: none !important; }
+/* a down unit is dark but for a short amber flash, faster as its strike nears (app.js, the racks' alarms) */
+.led.down.flash { fill: #F2C46B !important; }
+.led.hot { fill: #F2C46B !important; animation: led-hot 1.3s ease-in-out infinite !important; }
+.led.rebooting { fill: #F2C46B !important; animation: led-reboot .3s steps(1, end) infinite !important; }
+@keyframes led-hot { 50% { opacity: .35; } }
+@keyframes led-reboot { 50% { opacity: .15; } }
+
+
+
+/* a rack dropping packets (LOSS): its LEDs drop out and come back, each on its own beat, as the traffic falls through */
+.led.dropping:not(.down):not(.hot):not(.stuck):not(.rebooting) { animation: led-drop 1.7s steps(1, end) var(--drop, 0s) infinite !important; }
+@keyframes led-drop { 0% { opacity: 1; } 18% { opacity: .08; } 26% { opacity: 1; } 61% { opacity: .08; } 66% { opacity: 1; } }
+
+/* a stuck unit's LED: steady amber */
+.led.stuck { fill: #F2C46B !important; animation: none !important; }
+
+/* the terminal is drawn on a canvas (crt.js): the text, cursor and status line, bent to the glass */
+#term-canvas { position: absolute; inset: 0; width: 1320px; height: 826px; pointer-events: auto; }
+#terminal { transition: filter .5s ease; }
+body.sipping #terminal { filter: blur(1.4px); }
+.sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: pre; }
+
+/* a lost night: the room goes dark and stays dark; what happened and two choices, in the terminal's lettering,
+   glowing faintly in the dark as the tube's phosphor does */
+#night-over {
+  position: absolute; inset: 0 -240px; z-index: 50;
+  display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 18px;
+  font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace; font-size: 30px; color: #cfd6ff;
+  text-shadow: 0 0 10px rgba(200, 210, 255, .45);
+  background: rgba(4, 4, 6, .9);                /* the room is still there, only just */
+  opacity: 0; transition: opacity 1.2s ease;
+}
+#night-over.shown { opacity: 1; }
+#night-over[hidden] { display: none; }
+#night-over p { margin: 0; text-align: center; white-space: pre-line; line-height: 1.5; }
+#no-choices { display: flex; gap: 64px; margin-top: 24px !important; }
+#no-choices[hidden] { display: none; }
+#no-yet { transition: opacity 1.2s ease; }
+#no-yet.gone { opacity: 0; }
+#night-over button {
+  font: inherit; color: inherit; text-shadow: inherit; background: none; border: none; padding: 4px 10px; cursor: pointer;
+}
+#night-over button::before { content: '[ '; opacity: .5; }
+#night-over button::after { content: ' ]'; opacity: .5; }
+#night-over button:hover, #night-over button:focus-visible { color: #22308f; background: #cfd6ff; text-shadow: none; outline: none; }
+#no-report-text { margin: 12px 0 0; font: inherit; font-size: 22px; opacity: .8; white-space: pre-wrap; text-align: left; }
+#look.dark { filter: brightness(.06) !important; transition: filter 1.8s ease-in !important; }
+/* the whole page goes dark with the room, not just the frame */
+body.lost { background: #040406 !important; transition: background 1.8s ease-in; }
+body.lost > :not(#stage) { opacity: .15; transition: opacity 1.8s ease-in; }
