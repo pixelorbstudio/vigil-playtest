@@ -15,11 +15,11 @@
   // depth in the pedestal's units (1765 mm a unit); OPEN: all the way out. The drawer is far below the eye: its front
   // hides all of its floor but a strip at the back (about 6 cm deep, pulled right out), and its left wall hides the floor
   // left of x 1338; so the card does not lie on the floor, it stands at the back, leaning against it, its face to you.
-  const BOX = { x0: 1240, x1: 1480, y0: 1352, y1: 1462, depth: .22, wall: 8, wd: .01 };
+  const BOX = { x0: 1240, x1: 1480, y0: 1352, y1: 1462, depth: .22, wall: 9, wd: .01 };   // (walls 9 px: at 8 the top strips' edges stood 5.7 px apart)
   const OPEN = .22;
   // the card: 140 x 90 mm, landscape; where it stands: its bottom edge's middle at x, foot (in depth units) in front of
   // the drawer's back, leaning back against it by lean
-  const CARD = { w: 140, h: 90, x: 1378, foot: .02, lean: 15 * Math.PI / 180 };
+  const CARD = { w: 140, h: 90, x: 1340, foot: .05, lean: 15 * Math.PI / 180 };
   // What it says (Arnold to approve the words; design.md, "Onboarding"). In Caveat, the room's one hand. [left, right]:
   // the kinds in a column, what they mean and the fix beside them.
   const LINES = [
@@ -36,15 +36,18 @@
   function drawer(out) {
     const F = window.deskDrawer.F, { x0, x1, y0, y1, wall, wd } = BOX;
     const poly = (ps, fill, extra = '') => `<polygon points="${fmt(ps.map(F))}" fill="${fill}" ${extra}/>`;
-    // straight runs sampled every 10 px across, so the desk's bend curves them
-    const run = (a, b) => { const n = Math.max(1, Math.ceil(Math.abs(b[0] - a[0]) / 10)); return Array.from({ length: n }, (_, k) => a.map((v, j) => v + (b[j] - v) * k / n)); };
+    // straight runs sampled on one grid, at every whole x (and their ends), so the desk's bend curves them and two edges
+    // along the same line land on the same points (sampled each on its own, they stood 0.15 px apart: a doubled line)
+    const run = (a, b) => { const xs = [a[0]]; const lo = Math.min(a[0], b[0]), hi = Math.max(a[0], b[0]); for (let x = Math.floor(lo) + 1; x < hi; x++) xs.push(x); if (b[0] < a[0]) xs.splice(1, xs.length, ...xs.slice(1).reverse()); if (Math.abs(b[0] - a[0]) < 1e-9) return [a]; return xs.map(x => { const t = (x - a[0]) / (b[0] - a[0]); return a.map((v, j) => v + (b[j] - v) * t); }); };
     const quad = (a, b, c, d) => [...run(a, b), ...run(b, c), ...run(c, d), ...run(d, a)];
     const front = out, back = 0, floor = y1 - wall, ix0 = x0 + wall, ix1 = x1 - wall;
     let s = '', inner = '';
     if (out > .0005) {
       s += poly(quad([x0, y0, 0], [x1, y0, 0], [x1, y1, 0], [x0, y1, 0]), '#C8C8C6', INK);                       // the opening, dark
-      s += poly(quad([ix0, floor, back + wd], [ix1, floor, back + wd], [ix1, floor, front - wd], [ix0, floor, front - wd]), '#D2D2D0', INK);   // the floor
-      s += poly(quad([ix1, y0, back + wd], [ix1, y0, front - wd], [ix1, floor, front - wd], [ix1, floor, back + wd]), '#E2E2E0', INK);       // the right wall's inside
+      // the floor and the right wall's inside run right to the back: the wall's inside hides the opening's edge (started a
+      // hair in front of it, as the delivery drawer's do, a sliver of the opening showed and its edge stood 0.4 px off the wall's)
+      s += poly(quad([ix0, floor, back], [ix1, floor, back], [ix1, floor, front - wd], [ix0, floor, front - wd]), '#D2D2D0', INK);   // the floor
+      s += poly(quad([ix1, y0, back], [ix1, y0, front - wd], [ix1, floor, front - wd], [ix1, floor, back]), '#E2E2E0', INK);       // the right wall's inside
     }
     let over = '';
     if (out > .0005) {
@@ -97,5 +100,8 @@
     }
     return { svg, hit: fmt(ring) };
   }
-  window.cheatSheet = { BOX, OPEN, CARD, LINES, drawer, drawerHit, lyingPose, heldPose, card };
+  // it is drawn once it is wholly out of the pedestal (its top edge in front of the pedestal's face; inside, it is in the
+  // dark of the opening): 83% of the way out, while the drawer is still moving
+  const cardOut = out => out - BOX.depth + CARD.foot - CARD.h * Math.sin(CARD.lean) / 1765 >= .0005;
+  window.cheatSheet = { cardOut, BOX, OPEN, CARD, LINES, drawer, drawerHit, lyingPose, heldPose, card };
 })();

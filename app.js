@@ -981,14 +981,22 @@
   // do, and in it lies a handwritten card: what the trouble means and its fix. Clicked, the card is lifted and held up
   // in front of you, as the polaroid is; clicked again (or Escape), it goes back where it lay. Glenn mentions it once,
   // in his introduction.
+  // Lifted out of a drawer, a thing is drawn under the drawer's near walls while it still overlaps them (lying in the
+  // drawer, they hide part of it; drawn over everything from the first frame, the hidden part popped into view), and over
+  // everything once it is clear of them; the parallax starts its move only from there, so the change of layer can't show
+  // (audit-sheet.js, 2026-10-03)
+  const polysOf = svg => [...svg.matchAll(/<polygon points="([^"]+)"/g)].map(m => m[1].trim().split(/\s+/).map(q => q.split(',').map(Number)));
+  const insidePoly = (pt, poly) => { let c = false; for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) { const [xi, yi] = poly[i], [xj, yj] = poly[j]; if ((yi > pt[1]) !== (yj > pt[1]) && pt[0] < (xj - xi) * (pt[1] - yi) / (yj - yi) + xi) c = !c; } return c; };
+  const overlaps = (pts, walls) => pts.some(p => walls.some(w => insidePoly(p, w)));
+  const ptsOf = (svg, every = 1) => [...svg.matchAll(/(-?\d+\.?\d*),(-?\d+\.?\d*)/g)].filter((_, i) => i % every === 0).map(m => [+m[1], +m[2]]);
   const CS = window.cheatSheet;
   const sheet = { travel: 0, open: false, busy: false, held: false };
   const [sheetUnder, sheetCardG, sheetOver, sheetHit] = ['under', 'card', 'over', 'hit'].map(n => { const g = document.createElementNS(SVG, 'g'); g.id = 'sheet-' + n; deskG.appendChild(g); return g; });
   function drawSheet() {
     const d = CS.drawer(sheet.travel);
     sheetUnder.innerHTML = d.under;
-    // (only once its foot is out of the pedestal: before that it is inside, behind the desk)
-    const lying = sheet.travel >= CS.OPEN - CS.CARD.foot - .005 && !sheet.held ? CS.card(CS.lyingPose(sheet.travel), deskDrawer.roomF) : null;
+    // (only once it is wholly out of the pedestal: before that it is inside, in the dark of the opening)
+    const lying = CS.cardOut(sheet.travel) && !sheet.held ? CS.card(CS.lyingPose(sheet.travel), deskDrawer.roomF) : null;
     sheetCardG.innerHTML = lying ? lying.svg : '';
     sheetOver.innerHTML = d.over;
     sheetHit.innerHTML = `<polygon data-hit="front" points="${CS.drawerHit(sheet.travel)}" fill="transparent"/>` + (lying && sheet.open ? `<polygon data-hit="card" points="${lying.hit}" fill="transparent"/>` : '');
@@ -1023,9 +1031,14 @@
     const from = CS.lyingPose(sheet.travel), to = CS.heldPose(look.rest);
     drawSheet();
     keyDepth = DESK_FRONT_DEPTH;
+    const walls = polysOf(CS.drawer(sheet.travel).over);
+    let clearAt = null;
     await motion(700, u => {
-      const s = easeIO(u); keyDepth = DESK_FRONT_DEPTH + (.25 - DESK_FRONT_DEPTH) * s;
-      keyLayer.innerHTML = CS.card(between(from, to, s, v3.add(from.c, [0, -60, -20]), v3.add(to.c, [0, 30, 40])), roomOrFlat(s), 1 + .5 * s).svg;
+      const s = easeIO(u), c = CS.card(between(from, to, s, v3.add(from.c, [0, -60, -20]), v3.add(to.c, [0, 30, 40])), roomOrFlat(s), 1 + .5 * s);
+      if (clearAt === null && overlaps(ptsOf(c.hit), walls)) { sheetCardG.innerHTML = c.svg; keyLayer.innerHTML = ''; return; }
+      if (clearAt === null) { clearAt = s; sheetCardG.innerHTML = ''; }
+      keyDepth = DESK_FRONT_DEPTH + (.25 - DESK_FRONT_DEPTH) * (s - clearAt) / (1 - clearAt || 1);
+      keyLayer.innerHTML = c.svg;
     });
     sheetCatcher.style.display = '';
     sheet.busy = false;
@@ -1035,9 +1048,14 @@
     sheet.busy = true; sheetCatcher.style.display = 'none';
     playtest('cheat sheet: put back');
     const from = CS.heldPose(look.rest), to = CS.lyingPose(sheet.travel);
+    // going back in: over everything until it meets the drawer's near walls, then under them (the parallax arrives at the
+    // desk's as it gets there: the same moment, measured first)
+    const walls = polysOf(CS.drawer(sheet.travel).over), pose = s => between(from, to, s, v3.add(from.c, [0, 30, 40]), v3.add(to.c, [0, -60, -20]));
+    let meetAt = 1; for (let k = 0; k <= 60; k++) { const s = k / 60; if (overlaps(ptsOf(CS.card(pose(s), roomOrFlat(1 - s)).hit), walls)) { meetAt = s; break; } }
     await motion(650, u => {
-      const s = easeIO(u); keyDepth = .25 + (DESK_FRONT_DEPTH - .25) * s;
-      keyLayer.innerHTML = CS.card(between(from, to, s, v3.add(from.c, [0, 30, 40]), v3.add(to.c, [0, -60, -20])), roomOrFlat(1 - s), 1.5 - .5 * s).svg;
+      const s = easeIO(u), c = CS.card(pose(s), roomOrFlat(1 - s), 1.5 - .5 * s);
+      keyDepth = .25 + (DESK_FRONT_DEPTH - .25) * Math.min(1, s / (meetAt || 1));
+      if (s >= meetAt) { keyLayer.innerHTML = ''; sheetCardG.innerHTML = c.svg; } else keyLayer.innerHTML = c.svg;
     });
     keyLayer.innerHTML = '';
     sheet.held = false; drawSheet();
@@ -1155,20 +1173,36 @@
   // picture, it doesn't turn the camera; posed lower in the room it was seen from above, the lid edge-on): near (0..1)
   // blends the room's projection into the near camera's and the slide in with it
   const heldProj = s => { const pr = roomOrFlat(s); return p => { const q = pr(p); return [q[0], q[1] + look.rest * s]; }; };
+  // the delivery drawer's near walls (what it draws over a canister lying in it)
+  const dlvWalls = () => { const MARK = '<!--can-->'; return polysOf(delivery.drawer(dlv.travel, MARK).split(MARK)[1] || ''); };
+  let canIn = null;                                   // a canister drawn inside the drawer's layer (under its near walls)
   function drawCan(pose, s, lid, what) {
     const project = heldProj(s), A = pose.A, C = pose.C;
     const k = deskDrawer.proj(C), k2 = deskDrawer.proj(v3.add(C, A)), pxmm = Math.hypot(k2[0] - k[0], k2[1] - k[1]);
     // (the slip stands 40 mm out of the mouth: with the lid shut, or nearly, it is inside, under it)
-    canLayer.innerHTML = pxmm < 1.4 ? delivery.far(pose, project) : delivery.held(lid > Math.PI / 3 ? what : 'empty', pose, project, lid);
+    const svg = pxmm < 1.4 ? delivery.far(pose, project) : delivery.held(lid > Math.PI / 3 ? what : 'empty', pose, project, lid);
+    if (drawCan.walls && overlaps(ptsOf(svg, 7), drawCan.walls)) { canIn = svg; canLayer.innerHTML = ''; dlvG.innerHTML = delivery.drawer(dlv.travel, svg); return true; }
+    if (canIn !== null) { canIn = null; drawDlv(); }
+    canLayer.innerHTML = svg; return false;
   }
   async function dlvFly(toHands, lid0, lid1, ms, what) {
     const a = toFlight(delivery.drawerPose(delivery.OPEN)), b = toFlight(delivery.heldPose(0));
     const [p0, p1] = toHands ? [a, b] : [b, a];
+    const poseAt = s => fromFlight(between(p0, p1, s, v3.add(p0.c, [0, -40, 20]), v3.add(p1.c, [0, 20, 30])));
+    drawCan.walls = dlvWalls();
+    // where it is clear of the drawer's near walls (lifting) or meets them (going back): the parallax moves only above them
+    // lifting: the first moment it is clear of them; going back: the first moment it meets them
+    const pr = near => p => { const q = roomOrFlat(near)(p); return [q[0], q[1] + look.rest * near]; };
+    const over = s => overlaps(ptsOf(delivery.far(poseAt(s), pr(toHands ? s : 1 - s)), 7), drawCan.walls);
+    let edge = toHands ? 1 : 1;
+    for (let k = 0; k <= 60; k++) { const s = k / 60; if (toHands ? !over(s) : over(s)) { edge = s; break; } }
     await motion(ms, u => {
-      const s = easeIO(u), pose = fromFlight(between(p0, p1, s, v3.add(p0.c, [0, -40, 20]), v3.add(p1.c, [0, 20, 30])));
-      const near = toHands ? s : 1 - s; canDepth = DESK_FRONT_DEPTH + (.25 - DESK_FRONT_DEPTH) * near;
+      const s = easeIO(u), pose = poseAt(s);
+      const near = toHands ? s : 1 - s, m = toHands ? Math.max(0, (s - edge) / (1 - edge || 1)) : Math.max(0, 1 - s / (edge || 1));
+      canDepth = DESK_FRONT_DEPTH + (.25 - DESK_FRONT_DEPTH) * m;
       drawCan(pose, near, lid0 + (lid1 - lid0) * s, what);
     });
+    drawCan.walls = null;
   }
   const dlvCatcher = document.createElement('div');
   Object.assign(dlvCatcher.style, { position: 'fixed', inset: '0', zIndex: '50', display: 'none', cursor: 'pointer' });
@@ -1211,14 +1245,23 @@
     // the slip comes up out of the mouth as the canister goes back down into the drawer, its lid shutting
     const tip = delivery.rollTip(heldNow(), heldProj(1)), cy = look.rest + 470;
     const a = toFlight(heldNow()), b = toFlight(delivery.drawerPose(delivery.OPEN));
+    const poseAt = s => fromFlight(between(a, b, s, v3.add(a.c, [0, 20, 30]), v3.add(b.c, [0, -40, 20])));
+    // the slip in a layer of its own, at the held depth throughout (it shared the canister's, rode its parallax down to the
+    // desk's and jumped back when it stopped); the canister under the drawer's near walls once it meets them, its parallax
+    // arriving at the desk's at that moment
+    drawCan.walls = dlvWalls();
+    const pr = near => p => { const q = roomOrFlat(near)(p); return [q[0], q[1] + look.rest * near]; };
+    let meet = 1; for (let k = 0; k <= 60; k++) { const s = k / 60; if (overlaps(ptsOf(delivery.far(poseAt(s), pr(1 - s)), 7), drawCan.walls)) { meet = s; break; } }
+    keyDepth = .25;
     await motion(700, u => {
-      const s = easeIO(u), pose = fromFlight(between(a, b, s, v3.add(a.c, [0, 20, 30]), v3.add(b.c, [0, -40, 20])));
-      canDepth = .25 + (DESK_FRONT_DEPTH - .25) * s;
-      drawCan(pose, 1 - s, LID_OPEN * (1 - s), 'empty');
-      canLayer.innerHTML += slipFor(it, { cx: tip[0] + (720 - tip[0]) * s, cy: tip[1] + (cy - tip[1]) * s, k: .08 + .92 * s });
+      const s = easeIO(u);
+      canDepth = .25 + (DESK_FRONT_DEPTH - .25) * Math.min(1, s / (meet || 1));
+      drawCan(poseAt(s), 1 - s, LID_OPEN * (1 - s), 'empty');
+      keyLayer.innerHTML = slipFor(it, { cx: tip[0] + (720 - tip[0]) * s, cy: tip[1] + (cy - tip[1]) * s, k: .08 + .92 * s });
     });
+    drawCan.walls = null; canIn = null;
     dlv.can = { spent: true }; drawDlv();
-    canDepth = .25; canLayer.innerHTML = slipFor(it, { cx: 720, cy, k: 1 });
+    canLayer.innerHTML = ''; keyLayer.innerHTML = slipFor(it, { cx: 720, cy, k: 1 });
     dlv.stage = 'slip'; dlv.busy = false;
   }
   // done with it: the slip goes back down into the canister in the drawer, and the drawer shuts (sent back up)
@@ -1226,6 +1269,7 @@
     dlv.busy = true; dlvCatcher.style.display = 'none';
     const it = dlv.item, cy = look.rest + 470, to = deskDrawer.roomF(delivery.drawerPose(delivery.OPEN).C);
     playtest('slip: put away');
+    keyLayer.innerHTML = '';
     await motion(550, u => { const s = easeIO(u); canDepth = .25 + (DESK_FRONT_DEPTH - .25) * s; canLayer.innerHTML = slipFor(it, { cx: 720 + (to[0] - 720) * s, cy: cy + (to[1] - cy) * s, k: 1 - .92 * s }); });
     canLayer.innerHTML = '';
     await dlvShut();
@@ -1259,7 +1303,7 @@
     dlv.stage === 'slip' ? dlvPutAway() : dlvPutBack();
   }, true);
   // a new night: the drawer shut and empty, nothing on its way
-  function dlvReset() { dlv.queue = []; dlv.can = null; dlv.item = null; dlv.stage = 'idle'; dlv.travel = 0; dlv.busy = false; canLayer.innerHTML = ''; dlvCatcher.style.display = 'none'; drawDlv(); }
+  function dlvReset() { if (dlv.stage === 'slip') keyLayer.innerHTML = ''; dlv.queue = []; dlv.can = null; dlv.item = null; dlv.stage = 'idle'; dlv.travel = 0; dlv.busy = false; canLayer.innerHTML = ''; dlvCatcher.style.display = 'none'; drawDlv(); }
   window.__dlv = { arrive: dlvArrive, reset: dlvReset, state: dlv,
     // night 3: the canister in the blackout, with the supervisor link down, for aw (the blackout calls this once it is built)
     aw: () => dlvArrive({ why: 'aw', kind: 'note', aw: true }) };
@@ -1356,7 +1400,7 @@
       document.body.classList.remove('sipping');
       clink();
       sipping = false;
-      if (room.coffee <= 0) { term.say('that was the last of it.'); steam.dataset.said = '1'; if (glenn.once('brew', "Out already? Be a pal and type brew. There's beans for three pots, so pace yourself.")) glenn.order('brew', 'be a pal and type brew'); } else steam.dataset.said = '';
+      if (room.coffee <= 0) { term.say('that was the last of it.'); steam.dataset.said = '1'; if (glenn.once('brew', "Out already? Be a pal and type brew. Beans don't grow on trees, so pace yourself.")) glenn.order('brew', 'be a pal and type brew'); } else steam.dataset.said = '';
     })(t0);
   });
 
@@ -3248,8 +3292,9 @@
         : r.reason === 'already being fixed' ? `${u} is already being seen to.` : `${u} isn't fragmented. it's ${r.reason}.`];
       updateVitals();
       mode = 'game'; gameName = 'defrag';
-      // the night's first game teaches: one file is a single block from whole
-      const dial = shift.defragDial(), d = createDefrag({ files: dial.files, headStart: !room.defragTaught });
+      // the night's first game teaches: two files, the slowest writes, one file a single block from whole, whatever the hour
+      // (as ROUTE's first does; with trouble by mastery the first STUCK can come late, when the clock's dial gave three files)
+      const dial = room.defragTaught ? shift.defragDial() : { files: 2, writeEvery: 8 }, d = createDefrag({ files: dial.files, headStart: !room.defragTaught });
       room.defragTaught = true;
       if (window.dev) window.dev.game = d;                  // ?dev: the running game, for trying things out
       // four files, four shades you can't confuse at a glance, each with its own tint (all in the terminal font, so
