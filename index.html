@@ -52,31 +52,6 @@
   </div>
 </div>
 
-<div id="menu" hidden>
-  <div id="menu-panel" role="dialog" aria-label="menu">
-    <section id="menu-main">
-      <p class="menu-title">paused</p>
-      <button type="button" data-act="resume">resume <span class="menu-key">esc</span></button>
-      <button type="button" data-act="restart">restart the night</button>
-      <button type="button" data-act="settings">settings</button>
-      <p class="menu-note">progress saves automatically.</p>
-    </section>
-    <section id="menu-restart" hidden>
-      <p class="menu-title">restart the night?</p>
-      <p class="menu-note">your progress in it is lost.</p>
-      <button type="button" data-act="restart-yes">restart</button>
-      <button type="button" data-act="back">cancel</button>
-    </section>
-    <section id="menu-settings" hidden>
-      <p class="menu-title">settings</p>
-      <label class="menu-volume">volume <input id="menu-volume" type="range" min="0" max="100" step="1"></label>
-      <p class="menu-sub">switches</p>
-      <ul id="menu-switches"></ul>
-      <button type="button" data-act="back">back</button>
-    </section>
-  </div>
-</div>
-
 <div id="hud">
   <span id="hint">start typing · try the knobs · sip the coffee</span>
   <button id="hum" type="button" aria-pressed="false" title="Toggle the server room's ambient hum">hum: on</button>
@@ -85,6 +60,8 @@
 </div>
 
 <script src="pause.js"></script>
+<script src="chin.js"></script>
+<script src="note.js"></script>
 <script src="mug3d.js"></script>
 <script src="hand.js"></script>
 <script src="solid.js"></script>

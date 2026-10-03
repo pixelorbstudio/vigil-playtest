@@ -227,39 +227,6 @@ html, body {
 #mute[aria-pressed="true"], #hum[aria-pressed="true"] { color: #b0b0ae; }
 #mute[aria-pressed="true"] { text-decoration: line-through; }
 
-/* ---------- the menu (Esc): outside the room, in the hum and sound buttons' manner. The room behind is not dimmed,
-   blurred or flattened: it has simply stopped. ---------- */
-#menu { position: fixed; inset: 0; z-index: 100; display: grid; place-items: center; background: transparent; cursor: default; }
-#menu[hidden] { display: none; }
-#menu-panel {
-  font: 13px/1.5 ui-monospace, Consolas, monospace; letter-spacing: .02em; color: #6e6e6c;
-  background: #fff; border: 1px solid #cfcfcd; border-radius: 14px; padding: 18px 20px 16px;
-  width: min(360px, calc(100vw - 32px)); max-height: calc(100vh - 32px); overflow: auto; box-sizing: border-box;
-}
-#menu-panel section { display: flex; flex-direction: column; gap: 8px; }
-#menu-panel section[hidden] { display: none; }
-#menu-panel p { margin: 0; }
-.menu-title { color: #4a4a48; margin-bottom: 4px !important; }
-.menu-note, .menu-sub { color: #9a9a98; font-size: 12px; }
-.menu-note { margin-top: 6px !important; }
-#menu-panel button {
-  font: inherit; color: inherit; text-align: left; background: #fff; border: 1px solid #cfcfcd; border-radius: 999px;
-  padding: 6px 14px; cursor: pointer; display: flex; justify-content: space-between; gap: 10px;
-}
-#menu-panel button:hover, #menu-panel button:focus-visible { border-color: #9a9a98; outline: none; color: #4a4a48; }
-#menu-panel button:focus { outline: none; border-color: #9a9a98; color: #4a4a48; }
-.menu-key { color: #b0b0ae; }
-.menu-volume { display: flex; align-items: center; gap: 12px; }
-.menu-volume input { flex: 1; accent-color: #9a9a98; }
-#menu-switches { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; max-height: 46vh; overflow: auto; }
-#menu-switches button { width: 100%; border-radius: 10px; flex-wrap: wrap; justify-content: flex-start; }
-#menu-switches button.current { border-color: #6e6e6c; color: #4a4a48; }
-#menu-switches button.current .sw-name::after { content: '  (in use)'; color: #9a9a98; }
-.sw-name { color: inherit; }
-.sw-note { color: #9a9a98; font-size: 11px; flex-basis: 100%; order: 2; }
-.sw-rec { color: #9a9a98; font-size: 11px; margin-left: auto; order: 1; }
-.menu-more { color: #b0b0ae; font-size: 11px; margin-top: 4px; }
-
 @media (prefers-reduced-motion: reduce) {
   .led, .wisp, #term-tube, #hint, .power-led { animation: none !important; }
   .layer { transition: none; }

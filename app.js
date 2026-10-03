@@ -319,35 +319,16 @@
     await setPower(on);
   }
 
-  // ---- the sticky note on the bezel (Eugene's playtest, 2026-10-02: a new player didn't know what to type at the login).
-  // "login: your name", in Caveat, on the left of the bezel, wholly on its white band (measured in the page: the band runs
-  // from x 274 to 334 at y 440 and leans 9 degrees with the lens; the note leans 6, as stuck on by hand). A flat fill
-  // from the drawing's greys and its one-pixel stroke. Once you are logged in a click takes it off: it is a stiff card
-  // in the room's camera, on the bezel's plane (depth 1000, as the slot), held by its top edge; it peels forward, lets go
-  // and drops behind the keyboard. Kept off (vigil.noteOff) until a new operator logs in.
-  const NOTE = { w: 50, h: 48, at: [276.5, 445], lean: 6 * Math.PI / 180, Z: 1000, F: 1500, EYE: [720, 813] };
+  // ---- the sticky note on the bezel (Eugene's playtest, 2026-10-02: a new player didn't know what to type at the login;
+  // redone in round 2, Arnold, 2026-10-03: note.js has its shape). A standard Post-it, 76 mm, muted Post-it yellow, under the
+  // tube between the vents and the slot, "login: / your name" in Caveat. Once you are logged in a click takes it off: it
+  // peels forward held at its top, lets go and falls at its own scale, turning over to its plain back, behind the keyboard.
+  // Kept off (vigil.noteOff) until a new operator logs in.
   const noteG = document.createElementNS(SVG, 'g');
   noteG.id = 'login-note';
-  noteG.innerHTML = `<path d="M0 0H${NOTE.w}V${NOTE.h}H0Z" fill="#F4F4F2" stroke="#B4B4B4" stroke-width="1" stroke-linejoin="round"/>` +
-    `<text x="4" y="20" font-family="Caveat, cursive" font-size="12" fill="#6E6E6C">login:</text>` +
-    `<text x="3.5" y="36" font-family="Caveat, cursive" font-size="12" fill="#6E6E6C">your name</text>`;
   $('chin-details').after(noteG);
-  // the card in the camera: top-left corner P0, its edges along U (across) and V (down), each one note unit long
-  function notePose(peel = 0, drop = 0) {
-    const k = NOTE.Z / NOTE.F, c = Math.cos(NOTE.lean), sn = Math.sin(NOTE.lean);
-    const P0 = [(NOTE.at[0] - NOTE.EYE[0]) * k, (NOTE.at[1] - NOTE.EYE[1]) * k + drop, NOTE.Z];
-    const U = [c * k, sn * k, 0], V0 = [-sn * k, c * k, 0];
-    const V = [V0[0] * Math.cos(peel), V0[1] * Math.cos(peel), -k * Math.sin(peel)];   // the bottom comes toward you
-    return { P0, U, V };
-  }
-  const noteProj = p => [NOTE.EYE[0] + NOTE.F * p[0] / p[2], NOTE.EYE[1] + NOTE.F * p[1] / p[2]];
-  function placeNote(peel, drop) {
-    const { P0, U, V } = notePose(peel, drop), at = (u, v) => noteProj([0, 1, 2].map(i => P0[i] + U[i] * u + V[i] * v));
-    const o = at(0, 0), a = at(NOTE.w, 0), b = at(0, NOTE.h), d = at(NOTE.w, NOTE.h);
-    noteG.setAttribute('transform', `matrix(${(a[0] - o[0]) / NOTE.w} ${(a[1] - o[1]) / NOTE.w} ${(b[0] - o[0]) / NOTE.h} ${(b[1] - o[1]) / NOTE.h} ${o[0]} ${o[1]})`);
-    return Math.min(o[1], a[1], b[1], d[1]);          // its highest corner (turned over, that is its bottom edge)
-  }
-  placeNote(0, 0);
+  const placeNote = (peel = 0, drop = 0) => { noteG.innerHTML = loginNote.svg(peel, drop); };
+  placeNote();
   let noteOff = false;
   try { noteOff = localStorage.getItem('vigil.noteOff') === '1'; } catch (e) {}
   if (noteOff) noteG.style.display = 'none';
@@ -358,20 +339,19 @@
     noteOff = true; try { localStorage.setItem('vigil.noteOff', '1'); } catch (e) {}
     playtest('login note taken off');
     noteG.style.cursor = '';
-    // peel: the bottom lifts toward you, held at the top (a quarter second), then it lets go and falls, still turning,
-    // under gravity (9.81 m/s2 at 1.765 mm a camera unit), until it is behind the keyboard
-    await motion(260, u => placeNote(1.1 * u * u, 0));
-    const G = 9810 / 1.765 / 1e6, t0 = performance.now();
-    await new Promise(done => (function fall() {
-      const t = performance.now() - t0, top = placeNote(1.1 + t / 260, G * t * t / 2);
-      if (top > 900 || t > 1500) { noteG.style.display = 'none'; done(); return; }
-      requestAnimationFrame(fall);
+    const t0 = performance.now();
+    await new Promise(done => (function frame() {
+      const ms = performance.now() - t0, m = loginNote.motionAt(ms);
+      placeNote(m.peel, m.drop);
+      // gone once it is wholly behind the keyboard (audit-note.html: never over the desk on the way)
+      if (ms > 1200 || Math.min(...loginNote.shapes(m.peel, m.drop).outline.map(p => p[1])) > loginNote.END) { noteG.style.display = 'none'; done(); return; }
+      requestAnimationFrame(frame);
     })());
   });
   // a new operator finds it back on the bezel
-  function noteBack() { noteOff = false; try { localStorage.removeItem('vigil.noteOff'); } catch (e) {} placeNote(0, 0); noteG.style.display = ''; noteG.style.cursor = 'pointer'; }
+  function noteBack() { noteOff = false; try { localStorage.removeItem('vigil.noteOff'); } catch (e) {} placeNote(); noteG.style.display = ''; noteG.style.cursor = 'pointer'; }
 
-  // ---- the cartridge slot on the chin, left of the power LED
+  // ---- the cartridge slot on the chin
   // The cartridge is a box drawn in the illustration's language (top face, side, front cap, thin grey
   // strokes) and animated along the depth axis: at d=0 it sits flush in the slot; larger d means it
   // protrudes toward the viewer, so the cap projects lower and slightly larger and the top face appears.
@@ -428,10 +408,48 @@
   // looking down to the drawer.
   room.cart = false;
   cart.style.display = 'none';
-  for (const el of [chinPaths[1], chinPaths[2], cart]) {
-    el.classList.add('slot');
-    el.addEventListener('pointerdown', e => { e.preventDefault(); room.cart ? ejectCart() : reachForCart(); hint.classList.add('gone'); });
+  // The slot redrawn (Arnold, 2026-10-03, round 2; chin.js): it read as a button. The drawing's plate grows into a recessed
+  // surround twice as wide as tall, a raised lip runs round the opening, and the opening (the cartridge's end, unchanged:
+  // the cartridge is drawn through it) is a dark mouth with a lighter lower lip inside its bottom edge.
+  {
+    const P = chin.slot(), C = chin.COLOURS, pts = ps => ps.map(p => p[0].toFixed(3) + ',' + p[1].toFixed(3)).join(' ');
+    const INK = { stroke: '#B4B4B4', 'stroke-width': '1', 'stroke-linejoin': 'round' };
+    const set = (el, attrs) => { for (const [k, v] of Object.entries(attrs)) el.setAttribute(k, v); return el; };
+    set(chinPaths[1], { d: 'M' + pts(P.surround).split(' ').join('L') + 'Z', fill: C.surround, ...INK });
+    const lip = set(document.createElementNS(SVG, 'polygon'), { points: pts(P.lip), fill: C.lip, ...INK });
+    chinPaths[1].after(lip);
+    set(chinPaths[2], { d: 'M' + pts(P.mouth).split(' ').join('L') + 'Z', fill: C.mouth, ...INK });
+    const lipLine = set(document.createElementNS(SVG, 'path'), { d: 'M' + pts(P.lipLine).split(' ').join('L'), fill: 'none', stroke: C.lipLine, 'stroke-width': '1.2', 'stroke-linecap': 'round' });
+    lipLine.style.pointerEvents = 'none';
+    chinPaths[2].after(lipLine);
+    for (const el of [chinPaths[1], lip, chinPaths[2], cart]) {
+      el.classList.add('slot');
+      el.addEventListener('pointerdown', e => { e.preventDefault(); room.cart ? ejectCart() : reachForCart(); hint.classList.add('gone'); });
+    }
   }
+  // The power LED beside the power knob (Arnold, 2026-10-03): on a CRT the light sits by the power button, so the knob turning
+  // and the light changing are one glance. The drawing's own LED, moved: level with the knob's centre, as far from it as the
+  // power knob is from the brightness knob. (It is drawn in the bezel's coordinates, a hair from the stage's.)
+  powerLed.setAttribute('transform', `translate(${((chin.LED.to[0] - chin.LED.from[0]) * 981.85 / 980.06).toFixed(3)} ${((chin.LED.to[1] - chin.LED.from[1]) * 658.61 / 658.56).toFixed(3)})`);
+  // The clock readout (Arnold, 2026-10-03; chin.js): the plate above the knobs shows the shift's time, minute by minute,
+  // in seven segments, muted grey-green. It is the monitor's, not the tube's: lit with the screen off (05:30 to 05:43 it
+  // counts on with nobody coming). At the night's end it holds its last minute until the tube boots again, then reads
+  // 23:00. 04:44 is just 04:44. It stops with the night's clock when the game is paused.
+  const clockG = document.createElementNS(SVG, 'g');
+  clockG.id = 'clock-readout'; clockG.style.pointerEvents = 'none';
+  chinPaths[0].after(clockG);
+  let clockShown = null, clockHeld = false;
+  function drawClock(force) {
+    if (clockHeld && !force) return;
+    let t = '23:00'; try { t = shift.clock().slice(0, 5); } catch (e) {}
+    if (t === clockShown) return;
+    clockShown = t;
+    const C = chin.clock(t), K = chin.COLOURS, pts = ps => ps.map(p => p[0].toFixed(3) + ',' + p[1].toFixed(3)).join(' ');
+    clockG.innerHTML = `<polygon points="${pts(C.window)}" fill="${K.window}" stroke="#B4B4B4" stroke-width="1" stroke-linejoin="round"/>` +
+      C.segs.map(sg => `<polygon points="${pts(sg)}" fill="${K.digit}"/>`).join('');
+  }
+  drawClock();
+  setInterval(drawClock, 250);
   // The hand brings it square to the slot with its back end level with the chin (k = from), pushes it in, and
   // it seats a touch proud of the chin (k = .012) with a small settle.
   function insertCart(from, label) {
@@ -1427,7 +1445,7 @@
   });
 
   // ------------------------------------------------------------ sound
-  let audio = null, uiAudio = null, muted = false;
+  let audio = null, muted = false;
   // the volume (the menu's settings): one gain in front of the speakers, in every context; kept in vigil.volume
   let volume = .8;
   try { const v = localStorage.getItem('vigil.volume'); if (v !== null && !Number.isNaN(+v)) volume = clamp(+v, 0, 1); } catch (e) {}
@@ -1441,17 +1459,11 @@
   function setVolume(v) {
     volume = clamp(v, 0, 1);
     try { localStorage.setItem('vigil.volume', volume.toFixed(2)); } catch (e) {}
-    for (const c of [audio, uiAudio]) if (c?.master) c.master.gain.setTargetAtTime(volume, c.currentTime, .02);
+    if (audio?.master) audio.master.gain.setTargetAtTime(volume, audio.currentTime, .02);
   }
-  // The room's sounds hold while the game is paused (pause.js suspends its context); what the menu plays, a switch heard
-  // while choosing one, goes through a context of its own.
+  // (the room's sound carries on while the game is paused: the hum, the fans, the keys)
   function ac() {
-    if (window.vigilTime?.paused) {
-      if (!uiAudio) uiAudio = makeAudio();
-      if (uiAudio.state === 'suspended') uiAudio.resume();
-      return uiAudio;
-    }
-    if (!audio) audio = window.vigilTime ? window.vigilTime.audio(makeAudio()) : makeAudio();
+    if (!audio) audio = makeAudio();
     if (audio.state === 'suspended') audio.resume();
     return audio;
   }
@@ -1651,96 +1663,32 @@
   }
   loadPack(sigName);
 
-  // ------------------------------------------------------------ the menu (Esc)
-  // Outside the room (Arnold, 2026-10-03): page chrome in the hum and sound buttons' manner, and the room behind it not
-  // dimmed or blurred, simply stopped (pause.js: the night's clock, the energy, every motion, Glenn mid-sentence, the
-  // sounds). Esc opens it from anywhere, at once; Esc again closes it and the room carries on from the same frame. While
-  // it is open nothing typed or clicked reaches the room. The game pauses by itself, the menu open, when the tab or the
-  // window loses focus (?nopause leaves that off, for testing in a hidden pane).
-  // resume; restart the night (asked once); settings: the volume, and the switches with three marked recommended.
+  // ------------------------------------------------------------ the menu (Esc): its keys
+  // The menu is on the tube (Arnold, 2026-10-03: a page overlay that cut the sound was wrong for this game; tubeMenu, by the
+  // terminal, draws it). Its keys are taken here, first of all the page's: Esc opens it from anywhere and closes it; while it
+  // is open every key goes to it (the drawn keys still go down, the room's sounds are real) and nothing reaches the room.
+  // The lost night's dark screen keeps its own keys. Before the tube exists, nothing.
+  let tubeMenu = null;
   const RECOMMENDED = ['cream', 'topre', 'creamyv2'];
-  const menu = (() => {
-    const el = $('menu'), panel = $('menu-panel'), sections = [...el.querySelectorAll('section')];
-    let opened = false, lastAudition = 0;
-    const show = id => { for (const s of sections) s.hidden = s.id !== id; focusFirst(); };
-    const focusables = () => [...el.querySelectorAll('section:not([hidden]) button, section:not([hidden]) input')];
-    const focusFirst = () => { const f = focusables(); (f.find(b => b.classList.contains('current')) || f[0])?.focus({ preventScroll: true }); };
-    function open(why = 'esc') {
-      if (opened) return;
-      opened = true;
-      window.vigilTime?.pause();
-      playtest(`menu open (${why})`);
-      el.hidden = false; show('menu-main');
-    }
-    function close() {
-      if (!opened) return;
-      opened = false; el.hidden = true;
-      playtest('menu closed');
-      document.activeElement?.blur?.();
-      window.vigilTime?.resume();
-    }
-    // the switches: recommended first, then the rest; a row heard when it is chosen, used when it is clicked or entered
-    function listSwitches() {
-      const ul = $('menu-switches'); ul.innerHTML = '';
-      const names = [...RECOMMENDED.filter(n => PACKS[n]), ...SIG_NAMES.filter(n => !RECOMMENDED.includes(n))];
-      names.forEach((n, i) => {
-        if (i === RECOMMENDED.length) { const li = document.createElement('li'); li.className = 'menu-more'; li.textContent = 'more'; ul.appendChild(li); }
-        const li = document.createElement('li'), b = document.createElement('button');
-        b.type = 'button'; b.dataset.pack = n; b.className = n === sigName ? 'current' : '';
-        b.innerHTML = `<span class="sw-name">${n}</span><span class="sw-note">${PACKS[n].note.replace(/[&<>]/g, '')}</span>${RECOMMENDED.includes(n) ? '<span class="sw-rec">recommended</span>' : ''}`;
-        b.addEventListener('focus', () => audition(n));
-        b.addEventListener('click', () => { setSignature(n); for (const x of ul.querySelectorAll('button')) x.classList.toggle('current', x.dataset.pack === n); playtest('switch: ' + n); audition(n, true); });
-        li.appendChild(b); ul.appendChild(li);
-      });
-    }
-    // a switch heard while the room is paused (ac() hands back the menu's own context)
-    function audition(name, force) {
-      const now = window.vigilTime ? window.vigilTime.realNow() : performance.now();
-      if (!force && now - lastAudition < 90) return;
-      lastAudition = now;
-      // (on the page's clock: the room's is stopped)
-      const later = window.vigilTime ? window.vigilTime.later : setTimeout;
-      loadPack(name).then(() => ['key-J', 'key-K'].forEach((id, i) => later(() => { click('key', false, id, { pack: name }); later(() => click('key', true, id, { pack: name }), 60); }, i * 120)));
-    }
-    el.addEventListener('click', e => {
-      const b = e.target.closest('button[data-act]'); if (!b) return;
-      const act = b.dataset.act;
-      if (act === 'resume') close();
-      else if (act === 'restart') show('menu-restart');
-      else if (act === 'restart-yes') { playtest('restart the night'); location.reload(); }
-      else if (act === 'settings') { listSwitches(); $('menu-volume').value = Math.round(volume * 100); show('menu-settings'); }
-      else if (act === 'back') show('menu-main');
-    });
-    // a click on the room behind the panel does nothing (the room is stopped); the panel keeps its own
-    el.addEventListener('pointerdown', e => { if (!panel.contains(e.target)) e.preventDefault(); });
-    $('menu-volume').addEventListener('input', e => { setVolume(e.target.value / 100); audition(sigName); });
-    // keys: Esc closes (and resumes), up/down move between the choices, Enter and Space act on one; nothing reaches the room
-    addEventListener('keydown', e => {
-      if (e.key === 'Escape' || e.code === 'Escape') { e.preventDefault(); e.stopImmediatePropagation(); opened ? close() : open(); return; }
-      if (!opened) return;
-      e.stopImmediatePropagation();
-      if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
-        if (document.activeElement?.type === 'range') return;   // (the slider takes left/right; up/down move on)
-        e.preventDefault();
-        const f = focusables(), i = f.indexOf(document.activeElement);
-        f[(i + (e.key === 'ArrowDown' ? 1 : f.length - 1) + (i < 0 && e.key === 'ArrowUp' ? 1 : 0)) % f.length]?.focus();
-        return;
-      }
-      if (!['Enter', ' ', 'Tab', 'ArrowLeft', 'ArrowRight', 'Home', 'End', 'PageUp', 'PageDown'].includes(e.key)) e.preventDefault();
-    }, true);
-    addEventListener('keyup', e => { if (opened) e.stopImmediatePropagation(); }, true);
-    // the tab or the window loses focus: paused, the menu open (alt-tabbing never drains energy)
-    if (!new URLSearchParams(location.search).has('nopause')) {
-      addEventListener('blur', () => open('focus lost'));
-      document.addEventListener('visibilitychange', () => { if (document.hidden) open('tab hidden'); });
-    }
-    // fullscreen (the page never asks for it; a browser's own full screen, F11, isn't this): when an element's full screen
-    // is left, the browser has taken the Esc that left it, so the menu opens then, and one Esc still pauses
-    document.addEventListener('fullscreenchange', () => { if (!document.fullscreenElement) open('left full screen'); });
-    return { open, close, get opened() { return opened; } };
-  })();
+  addEventListener('keydown', e => {
+    if (!tubeMenu || !$('night-over').hidden) return;
+    const isEsc = e.key === 'Escape' || e.code === 'Escape';
+    if (!tubeMenu.opened && !isEsc) return;
+    e.preventDefault(); e.stopImmediatePropagation();
+    const id = CODE_TO_ID[codeOf(e)]; if (id && !e.repeat) press(id);
+    if (!tubeMenu.opened) { tubeMenu.open('esc'); return; }
+    tubeMenu.key(isEsc ? 'Escape' : e.key);
+  }, true);
+  // the tab or the window loses focus: paused, the menu up (alt-tabbing never drains energy); ?nopause leaves that off, for
+  // testing in a hidden pane. And if the page were ever full screen, the browser takes the first Esc to leave it, so leaving
+  // it opens the menu: one Esc still pauses.
+  if (!new URLSearchParams(location.search).has('nopause')) {
+    addEventListener('blur', () => tubeMenu?.open('focus lost'));
+    document.addEventListener('visibilitychange', () => { if (document.hidden) tubeMenu?.open('tab hidden'); });
+  }
+  document.addEventListener('fullscreenchange', () => { if (!document.fullscreenElement) tubeMenu?.open('left full screen'); });
 
-  const limiters = new Map();                         // one per audio context (the room's, the menu's)
+  const limiters = new Map();                         // one per audio context
   function keyLimiter(ctx) {
     if (limiters.has(ctx)) return limiters.get(ctx);
     const comp = ctx.createDynamicsCompressor();
@@ -2138,7 +2086,7 @@
       e.preventDefault(); mouseKey = id; press(id);
       const letter = id.slice(4);
       const k = ID_TO_KEY[id] ?? (letter.length === 1 ? letter.toLowerCase() : null);
-      if (k === 'Escape') { setTimeout(() => menu.open(), 120); return; }   // the drawn esc, as the real one: the menu
+      if (k === 'Escape') { setTimeout(() => tubeMenu?.open('the drawn esc'), 120); return; }   // the drawn esc, as the real one: the menu
       if (k !== null) term.input(k);
       hint.classList.add('gone');
     });
@@ -2675,6 +2623,7 @@
     await wait(2600);
     // the next night, up to the third (until the finale is built, the third comes round again)
     try { localStorage.setItem('vigil.night', String(Math.min(3, shift.level + 1))); } catch (e) {}
+    clockHeld = true;                                  // (the clock readout keeps its last minute in the dark)
     account.loggingIn = true;                          // the clock waits for the login
     asleep = false;
     startShift(); updateVitals(); glenn.newNight();
@@ -2682,6 +2631,7 @@
     term.clear();
     // and back on by itself (turned on by hand in the dark, it just boots a moment sooner)
     await turnItself(true);
+    clockHeld = false; drawClock(true);                // 23:00, with the screen
     await term.boot(['Last shift ended ....... 05:30, 0 minutes ago'], firstAlert);
     clockedIn();
   }
@@ -2885,9 +2835,26 @@
         rows = all.slice(start, end);
         if (cursor) cursor = scrollBack ? null : { row: cursor.row - start, col: cursor.col };
       }
-      crt.paint({ rows, cursor, cursorOn, status, field: frame ? field : null,
+      // the menu (tubeMenu): a box laid over whatever the tube shows, its own cells replacing those under it; the game's
+      // grid (ROUTE's) is left out while it is up, and there is no cursor
+      if (menuBox) { rows = boxOver(rows, menuBox.map(runsOf)); cursor = null; }
+      crt.paint({ rows, cursor, cursorOn, status, field: frame && !menuBox ? field : null,
         burn: piece(3) ? clamp((.35 - room.brightness) / .35, 0, 1) : 0, burnText: 'm@vigil:~$' });
       termOut.textContent = rows.map(r => r.map(x => x.text).join('')).join('\n');   // for screen readers
+    }
+    // the menu's box over the rows: centred across, and a little above the middle
+    let menuBox = null;
+    function boxOver(rows, box) {
+      const BW = lenOf(box[0]), c0 = Math.max(0, Math.floor((crt.COLS - BW) / 2)), r0 = Math.max(0, Math.floor((crt.ROWS - box.length) / 2) - 1);
+      const out = rows.slice(); while (out.length < r0 + box.length) out.push([]);
+      const cells = row => { const c = []; for (const r of row) for (const ch of r.text) c.push({ ch, cls: r.cls }); return c; };
+      const runs = c => { const row = []; for (const { ch, cls } of c) { const p = row[row.length - 1]; if (p && p.cls === cls) p.text += ch; else row.push({ text: ch, cls }); } return row; };
+      box.forEach((b, i) => {
+        const c = cells(out[r0 + i] || []); while (c.length < c0) c.push({ ch: ' ' });
+        c.splice(c0, BW, ...cells(b));
+        out[r0 + i] = runs(c);
+      });
+      return out;
     }
     // the cursor blinks, and the wheel over the tube scrolls back through what has been said
     setInterval(() => { cursorOn = !cursorOn; if (!frame) render(); }, 525);
@@ -4206,7 +4173,100 @@
       // next prompt (it never vanishes)
       clear() { lines = []; pending = [...line, ...pending]; line = ''; scrollBack = 0; render(); },
       mount, setMode, boot, announce, typeLine,
+      // the menu's box (tubeMenu), drawn over what is on the tube until it is taken away
+      showMenu(lines) { menuBox = lines; render(); },
+      hideMenu() { menuBox = null; render(); },
     };
+  })();
+
+  // ------------------------------------------------------------ the menu (Esc), on the tube
+  // On the CRT, in the terminal's own font and phosphor, like the mail picker (Arnold, 2026-10-03): a box over whatever the
+  // tube shows (the prompt, a game, the mail), with resume, restart the night (asked first) and settings (the volume, the
+  // switches, three marked recommended); up/down and enter, left/right for the volume, Esc resumes from any page of it.
+  // Paused (pause.js), the night's clock and the clock readout, the energy, Glenn mid-sentence, the story's moments and
+  // every motion stop on the frame they were on; the room keeps breathing: the hum, the rack fans, the LEDs. With the
+  // monitor off, Esc wakes the tube to show it, and it goes dark again on resume; the knob doesn't move. A click on the room
+  // does nothing while it is up.
+  tubeMenu = (() => {
+    const IN = 44, catcher = document.createElement('div');
+    Object.assign(catcher.style, { position: 'fixed', inset: '0', zIndex: '60', display: 'none' });
+    document.body.appendChild(catcher);
+    let opened = false, page = 'main', sel = 0, swTop = 0, woke = false;
+    const escH = t => t.replace(/[&<>]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c]));
+    const pad = t => t + ' '.repeat(Math.max(0, IN - [...t].length));
+    const row = (t = '', cls) => ({ html: '|' + (cls ? `<span class="${cls}">${escH(pad(t))}</span>` : escH(pad(t))) + '|' });
+    const bar = { text: '+' + '-'.repeat(IN) + '+' };
+    const switches = () => [...RECOMMENDED.filter(n => PACKS[n]), ...SIG_NAMES.filter(n => !RECOMMENDED.includes(n))];
+    const SW_ROWS = 5;
+    // each page's choices: { label, act }, a switch, or the volume
+    function items() {
+      if (page === 'main') return [{ label: 'resume', act: close }, { label: 'restart the night', act: () => go('restart', 0) }, { label: 'settings', act: () => go('settings', 0) }];
+      if (page === 'restart') return [{ label: 'no, go back', act: () => go('main', 1) }, { label: 'yes, restart the night', act: () => { playtest('restart the night'); location.reload(); } }];
+      return [{ volume: true }, ...switches().map(n => ({ sw: n })), { label: 'back', act: () => go('main', 2) }];
+    }
+    const go = (p, s) => { page = p; sel = s; swTop = 0; draw(); };
+    function draw() {
+      const L = items(), lines = [bar];
+      const choice = (i, text) => lines.push(i === sel ? row(' > ' + text, 'dg-cur') : row('   ' + text));
+      if (page === 'main') {
+        lines.push(row('              P A U S E D'), row());
+        L.forEach((it, i) => choice(i, it.label));
+        lines.push(row(), row('   progress saves automatically.', 'dim'), row('   up/down and enter.  esc: resume', 'dim'));
+      } else if (page === 'restart') {
+        lines.push(row('   restart the night?'), row('   your progress in it is lost.', 'dim'), row());
+        L.forEach((it, i) => choice(i, it.label));
+        lines.push(row(), row('   esc: resume', 'dim'));
+      } else {
+        const sw = switches(), filled = Math.round(volume * 20);
+        lines.push(row('           S E T T I N G S'));
+        choice(0, `volume   ${'█'.repeat(filled)}${'░'.repeat(20 - filled)} ${String(Math.round(volume * 100)).padStart(3)}%`);
+        lines.push(row('   switches  (* in use)', 'dim'));
+        const si = sel - 1;                              // which switch is chosen, if one is
+        if (si >= 0 && si < sw.length) { if (si < swTop) swTop = si; if (si >= swTop + SW_ROWS) swTop = si - SW_ROWS + 1; }
+        for (let k = swTop; k < Math.min(sw.length, swTop + SW_ROWS); k++) choice(k + 1, `${sw[k].padEnd(12)}${RECOMMENDED.includes(sw[k]) ? 'recommended' : '           '}${sw[k] === sigName ? '  *' : ''}`);
+        choice(L.length - 1, 'back');
+        lines.push(row(`   up/down, left/right, enter.  esc: resume`, 'dim'));
+      }
+      lines.push(bar);
+      term.showMenu(lines);
+    }
+    // a switch heard as it is chosen (on the page's clock: the room's is stopped)
+    let lastHeard = 0;
+    function audition(name) {
+      const now = window.vigilTime ? window.vigilTime.realNow() : performance.now();
+      if (now - lastHeard < 90) return; lastHeard = now;
+      const later = window.vigilTime ? window.vigilTime.later : setTimeout;
+      loadPack(name).then(() => ['key-J', 'key-K'].forEach((id, i) => later(() => { click('key', false, id, { pack: name }); later(() => click('key', true, id, { pack: name }), 60); }, i * 120)));
+    }
+    function key(k) {
+      if (k === 'Escape') { close(); return; }
+      const L = items(), it = L[sel];
+      if (k === 'ArrowDown' || k === 'ArrowUp') { sel = (sel + (k === 'ArrowDown' ? 1 : L.length - 1)) % L.length; draw(); if (L[sel].sw) audition(L[sel].sw); return; }
+      if ((k === 'ArrowLeft' || k === 'ArrowRight') && it.volume) { setVolume(Math.round((volume + (k === 'ArrowRight' ? .05 : -.05)) * 20) / 20); draw(); audition(sigName); return; }
+      if (k === 'Enter' || k === ' ') {
+        if (it.act) it.act();
+        else if (it.sw) { setSignature(it.sw); playtest('switch: ' + it.sw); draw(); audition(it.sw); }
+      }
+    }
+    function open(why) {
+      if (opened) return;
+      opened = true; page = 'main'; sel = 0;
+      window.vigilTime?.pause();
+      playtest(`menu open (${why})`);
+      // the monitor off: the tube wakes to show the menu (the knob doesn't move), and goes dark again on resume
+      if (!room.power) { woke = true; screenG.classList.remove('off'); terminal.classList.remove('off'); }
+      catcher.style.display = '';
+      draw();
+    }
+    function close() {
+      if (!opened) return;
+      opened = false; term.hideMenu();
+      if (woke && !room.power) { screenG.classList.add('off'); terminal.classList.add('off'); }
+      woke = false; catcher.style.display = 'none';
+      playtest('menu closed');
+      window.vigilTime?.resume();
+    }
+    return { open, close, key, get opened() { return opened; } };
   })();
 
   updateVitals();
