@@ -21,14 +21,17 @@
   // the drawer's back, leaning back against it by lean
   const CARD = { w: 140, h: 90, x: 1340, foot: .05, lean: 15 * Math.PI / 180 };
   // What it says (Arnold to approve the words; design.md, "Onboarding"). In Caveat, the room's one hand. [left, right]:
-  // the kinds in a column, what they mean and the fix beside them.
+  // the kinds in a column, what they mean and the fix beside them; STUCK and LOSS say how, on a second line under their
+  // fix (Arnold, 2026-10-03: "the DEFRAG cart" alone left a player not knowing what to type)
   const LINES = [
-    { t: 'night shift, the short version', y: -30, size: 9 },
-    { k: 'DOWN', t: 'not answering: reboot it', y: -16 },
-    { k: 'HOT', t: 'running hot: reroute it', y: -5 },
-    { k: 'STUCK', t: 'in pieces: the DEFRAG cart', y: 6 },
-    { k: 'LOSS', t: 'a rack losing packets: ROUTE', y: 17 },
-    { t: 'type  top  to see every rack', y: 30 },
+    { t: 'night shift, the short version', y: -33, size: 9 },
+    { k: 'DOWN', t: 'not answering: reboot it', y: -22 },
+    { k: 'HOT', t: 'running hot: reroute it', y: -13 },
+    { k: 'STUCK', t: 'in pieces: put in the DEFRAG cart,', y: -4 },
+    { t: 'type  defrag + the unit', y: 4, cont: true },
+    { k: 'LOSS', t: 'a rack losing packets: put in the', y: 13 },
+    { t: 'ROUTE cart, type  route + the rack', y: 21, cont: true },
+    { t: 'type  top  to see every rack', y: 31 },
     { t: "you'll be fine :)", y: 39, size: 7.5, right: true },
   ];
   const COL = { k: -61, t: -36 }, SIZE = 8;
@@ -94,8 +97,9 @@
       };
       for (const l of LINES) {
         if (l.k) svg += text(l.k, COL.k, l.y, SIZE, 'start', '#4E4E4C') + text(l.t, COL.t, l.y, SIZE);
+        else if (l.cont) svg += text(l.t, COL.t, l.y, SIZE);
         else if (l.right) svg += text(l.t, hw - 10, l.y, l.size || SIZE, 'end');
-        else svg += text(l.t, COL.k, l.y, l.size || SIZE, 'start', l.y < -30 ? '#4E4E4C' : '#6E6E6C');
+        else svg += text(l.t, COL.k, l.y, l.size || SIZE, 'start', l.size === 9 ? '#4E4E4C' : '#6E6E6C');
       }
     }
     return { svg, hit: fmt(ring) };

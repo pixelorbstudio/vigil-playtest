@@ -65,10 +65,16 @@
   // frame), two felt bands, a hinged lid with a rounded edge
   const CAN = { L: 150, r: 30 };
   const SEAT = CAN.L - 18, WALL = 6;                     // the mouth; the wall there and the lid's lip (at 3 mm their rings stood 3-5 px apart)
-  // seen small (in the drawer, about 0.7 px a mm): square ends, its bands flush, edged by a ring each, the lid shut
+  // its ends rounded, the base 3 mm and the lid 5 mm, as tangent arcs sampled finer than the crease angle (so they draw
+  // no ring of their own, only their silhouette): the same outline small and held, so nothing jumps where the flight
+  // swaps one drawing for the other (a square end small and a rounded one held put 4 to 6 px between them)
+  const BASE_ROUND = r => Array.from({ length: 25 }, (_, k) => { const t = Math.PI / 2 * k / 24; return [3 - 3 * Math.cos(t), r - 3 + 3 * Math.sin(t), 'can']; });
+  // seen small (in the drawer, about 0.7 px a mm): its bands flush, edged by a ring each, where the held one has them; the
+  // lid shut (its seam, 8 mm from the band's ring, would stand under 6 px from it, so it is left out small)
   function farProfile() {
-    const { L, r } = CAN;
-    return [[0, 0, 'can'], [0, r, 'can'], [18, r, 'band'], [32, r, 'can'], [L - 32, r, 'band'], [L - 18, r, 'can'], [L, r, 'can'], [L, 0]];
+    const { L, r } = CAN, seat = L - 18;
+    const lidEnd = Array.from({ length: 25 }, (_, k) => { const t = Math.PI / 2 * k / 24; return [L - 5 + 5 * Math.sin(t), r - 5 + 5 * Math.cos(t), 'round']; });
+    return [[0, 0, 'can'], ...BASE_ROUND(r), [18, r, 'band'], [32, r, 'can'], [seat - 22, r, 'band'], [seat - 8, r, 'can'], ...lidEnd, [L, 0]];
   }
   // in the drawer: across the back, against the right wall, its lid end toward the frame; the drawer's own depth moves it
   // (at OPEN it lies .035 out of the pedestal; a little further left and its far end showed as a sliver over the wall)
@@ -79,8 +85,15 @@
     const L = CAN.L;
     return { C: [mid[0] - A[0] * k * L / 2, mid[1] - CAN.r * k, mid[2] - A[2] * k * L / 2], A: V3.mul(A, k), U: V3.mul(U, k), V: V3.mul(V, k) };
   }
+  // (the lid's rounded edge lit as the side it rounds off from, as the held lid's is: lit by its own normal, its tone's
+  // edge stepped across the narrow bands. Only the bands are edged by a ring: the round's own change of tone isn't a line.)
+  // Fills first, then every line over them, as the held lid is drawn (its rounded edge is many narrow bands, and band by
+  // band each fill covered half the outline of the one before, which put a step in the end's outline); the canister is
+  // convex, so nothing seen lies in front of anything else seen.
   function far(pose, project) {
-    return window.lathe.compose(window.lathe.lathe(farProfile(), pose, project, LM, { sectors: 720, matEdges: true, split: false, seal: true }));
+    const Au = V3.unit(pose.A), round = n => { const d = V3.dot(n, Au), m = V3.unit(V3.add(n, V3.mul(Au, -d))); return V3.dot(m, window.solid.L) > .15 ? LM.can[0] : LM.can[1]; };
+    const all = window.lathe.compose(window.lathe.lathe(farProfile(), pose, project, { ...LM, round }, { sectors: 720, matEdges: ['band'], split: false, seal: true }));
+    return all.replace(/<path [^>]*\/>/g, '') + [...all.matchAll(/<path [^>]*\/>/g)].map(m => m[0]).join('');
   }
   // held across in front of you, its open end turned toward you and a little down, the hinge on top. One true size: the
   // camera brings it close (as near as the stills held it 1.7 times its size, so the same on screen). rest: where you
@@ -100,11 +113,12 @@
     const L = window.lathe, { r } = CAN, { C, A, U, V } = pose, Uu = V3.unit(U);
     const at = (h, u, v) => V3.add(V3.add(V3.add(C, V3.mul(A, h)), V3.mul(U, u)), V3.mul(V, v));
     const seat = SEAT;
-    // the felt bands stand 4 mm proud (at 3 their step put two rings 5.8 px apart)
-    const body = [[0, 0, 'can'], [0, r - 3, 'can'], [3, r, 'can'], [18, r, 'band'], [18, r + 4, 'band'], [32, r + 4, 'band'], [32, r, 'can'],
-      [seat - 22, r, 'band'], [seat - 22, r + 4, 'band'], [seat - 8, r + 4, 'band'], [seat - 8, r, 'can'], [seat, r, 'rim'], [seat, r - WALL, 'inside'], [10, r - WALL, 'inside'], [10, 0]];
+    // the felt bands flush, edged by a ring each, as in the drawer (Arnold, 2026-10-03: they stood 4 mm proud here and
+    // flush there, so its outline jumped 11 px where the flight swaps one drawing for the other)
+    const body = [[0, 0, 'can'], ...BASE_ROUND(r), [18, r, 'band'], [32, r, 'can'],
+      [seat - 22, r, 'band'], [seat - 8, r, 'can'], [seat, r, 'rim'], [seat, r - WALL, 'inside'], [10, r - WALL, 'inside'], [10, 0]];
     const mats = { ...LM, rim: LM.can };
-    const items = L.lathe(body, { C, A, U, V }, project, mats, { sectors: 720, noGenerators: ['inside'], split: false, seal: true });
+    const items = L.lathe(body, { C, A, U, V }, project, mats, { sectors: 720, noGenerators: ['inside'], split: false, seal: true, matEdges: true });
     // the lid, hinged at the back of the rim
     const hinge = at(seat, 0, r), ax = Uu, Au = V3.unit(A);
     const sw = V3.dot(rot(Au, ax, -lid), V) > 0 ? -lid : lid;
@@ -171,8 +185,8 @@
   // place: { cx, cy, k } (centre on the stage, and scale: 1 is held up, smaller on its way out of the canister)
   const SLIP = { w: 560, h: 300, rot: -3 };
   const esc = t => String(t).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
-  function slip(kind, { note = [], to = '', aw = false } = {}, place = { cx: 720, cy: 470, k: 1 }) {
-    const { w, h } = SLIP, a = SLIP.rot * Math.PI / 180, c = Math.cos(a) * place.k, si = Math.sin(a) * place.k;
+  function slip(kind, { note = [], to = '', aw = false, no = 412 } = {}, place = { cx: 720, cy: 470, k: 1 }) {
+    const { w, h } = SLIP, a = (place.rot ?? SLIP.rot) * Math.PI / 180, c = Math.cos(a) * place.k, si = Math.sin(a) * place.k;
     const P2 = (x, y) => [place.cx + (x - w / 2) * c - (y - h / 2) * si, place.cy + (x - w / 2) * si + (y - h / 2) * c];
     const m = [c, si, -si, c, ...P2(0, 0)].map(v => v.toFixed(4)).join(' ');
     const MONO = 'font-family="ui-monospace, Consolas, monospace"';
@@ -183,7 +197,7 @@
     if (kind === 'beans') {
       inner += text(w - 28, 42, 'SITE 4', `font-weight="600" font-size="13" letter-spacing="2" fill="${GREY}" text-anchor="end"`);
       inner += text(28, 66, 'ISSUE SLIP · STORES', `font-size="12" letter-spacing="1.5" fill="${GREY}"`);
-      inner += text(w - 28, 66, 'No. 0412', `font-size="12" letter-spacing="1" fill="${GREY}" text-anchor="end"`);
+      inner += text(w - 28, 66, 'No. ' + String(no).padStart(4, '0'), `font-size="12" letter-spacing="1" fill="${GREY}" text-anchor="end"`);
       inner += rule(84);
       inner += text(28, 150, 'ISSUED: 1 BAG · NIGHT SHIFT BLEND', `font-size="22" letter-spacing=".5" fill="${TYPE}"`);
       inner += rule(210);

@@ -974,12 +974,11 @@
     file.busy = false;
   }
   catcher.addEventListener('pointerdown', e => { e.preventDefault(); putPhotoDown(); });
-  addEventListener('keydown', e => { if (held && e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); putPhotoDown(); } }, true);
   fileHits.addEventListener('pointerdown', e => { if (!e.target.dataset?.hit) return; e.preventDefault(); liftPhoto(); });
 
   // ---- the cheat sheet (Eugene's playtest, 2026-10-02; sheet.js): the right pedestal's top drawer opens as the others
   // do, and in it lies a handwritten card: what the trouble means and its fix. Clicked, the card is lifted and held up
-  // in front of you, as the polaroid is; clicked again (or Escape), it goes back where it lay. Glenn mentions it once,
+  // in front of you, as the polaroid is; clicked again (or anywhere else), it goes back where it lay (Esc is the menu's). Glenn mentions it once,
   // in his introduction.
   // Lifted out of a drawer, a thing is drawn under the drawer's near walls while it still overlaps them (lying in the
   // drawer, they hide part of it; drawn over everything from the first frame, the hidden part popped into view), and over
@@ -1067,7 +1066,6 @@
     if (hit === 'card') liftSheet(); else sheet.open ? closeSheet() : openSheet();
   });
   sheetCatcher.addEventListener('pointerdown', e => { e.preventDefault(); putSheetBack(); });
-  addEventListener('keydown', e => { if (sheet.held && e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); putSheetBack(); } }, true);
   drawSheet();
   // ---- the deliveries (design.md, "Deliveries"; drawing in delivery.js). Coffee is earned by working well and comes
   // down the tube from upstairs: a rattle down through the wall, a thunk inside the desk, and the delivery drawer (the
@@ -1137,14 +1135,34 @@
     }
   }
   // ---- the flow
+  // Beans are never held up (Arnold, 2026-10-03; in the playtest an unopened canister kept Glenn's 02:00 bag in the tube for
+  // three hours): beans due while a canister waits unopened (in the drawer, on its way, or in your hands) go into it as a
+  // second slip, and opening it gives both. They still come down the tube: its rattle and thunk, nothing else to see.
+  function waitingCan() {
+    if (dlv.incoming) return dlv.incoming;
+    if (dlv.can && !dlv.can.spent) return dlv.can;
+    if (dlv.item && dlv.stage === 'held') return dlv.item;
+    return null;
+  }
+  function joinCan(can, item) {
+    playtest(`delivery: ${item.why}, ${item.kind}, into the waiting canister`);
+    if (can.kind === 'empty') { can.kind = item.kind; can.why = item.why; }   // (night 2's empty one: now it brings the bag)
+    else (can.more = can.more || []).push(item);
+    dlvSound('tube-rattle'); setTimeout(() => dlvSound('tube-thunk'), 1450);
+  }
   async function dlvArrive(item) {
+    const can = item.kind === 'beans' && !item.aw ? waitingCan() : null;
+    if (can && !can.aw) { joinCan(can, item); return; }
     if (dlv.can || dlv.item || dlv.busy) { dlv.queue.push(item); return; }
-    dlv.busy = true;
+    dlv.busy = true; dlv.incoming = item;
     playtest(`delivery: ${item.why}, ${item.kind}`);
     dlvSound('tube-rattle');
     await wait(1450);
     dlvSound('tube-thunk');
-    dlv.can = item; drawDlv();
+    dlv.incoming = null; dlv.can = item; drawDlv();
+    // the night's first delivery, Glenn says so, once (Arnold, 2026-10-03: in the playtest it passed unnoticed at the
+    // terminal); after that, only the sound
+    if (!room.dlvSaid && !item.aw && !room.linkDown) { room.dlvSaid = true; glenn.say('Something for you in the drawer, chief.'); }   // (not aw's, in the blackout: the link is down)
     await wait(260);
     if (dlv.travel < delivery.NUDGE) { drawerSound(true, 380); await dlvTween(420, delivery.NUDGE, u => 1 - Math.pow(1 - u, 3)); }
     dlv.busy = false;
@@ -1231,13 +1249,22 @@
     logLine('vigild[1]: operator compliance: yes (delivery opened)');
     playtest(`canister: opened (${it.kind})`);
     if (it.kind === 'beans') giveBeans(1, it.why === 'bag' ? "glenn's bag" : 'delivery');
+    for (const m of it.more || []) setTimeout(() => giveBeans(1, (m.why === 'bag' ? "glenn's bag" : 'delivery') + ', second slip'), 420);
     if (it.kind === 'note') it.note = it.aw ? AW_NOTE : nextNote();
     // it springs open: past wide open and back
     await motion(300, u => { const sp = 1 - Math.pow(1 - u, 3) * Math.cos(u * Math.PI * 1.5); dlv.lid = LID_OPEN * Math.min(1.06, sp); drawCan(heldNow(), 1, dlv.lid, what); });
     dlv.lid = LID_OPEN; drawCan(heldNow(), 1, dlv.lid, what);
     dlv.stage = 'open'; dlv.busy = false;
   }
-  function slipFor(it, place) { return delivery.slip(it.kind, { note: it.note, to: account.name || account.user, aw: it.aw }, place); }
+  // the slips held up: what came first in front, a second one (beans that joined it) behind it and higher, its printed
+  // head showing over the first (VIGIL SYSTEMS, ISSUE SLIP), as two papers held together (offset to the left as well, the
+  // ends of its typed lines showed down its side as stray letters)
+  function slipFor(it, place) {
+    const to = account.name || account.user, more = it.more || [];
+    let svg = '';
+    more.slice().reverse().forEach((m, i) => { const j = more.length - i; svg += delivery.slip(m.kind, { to, no: 412 + j }, { cx: place.cx + 18 * j * place.k, cy: place.cy - 76 * j * place.k, k: place.k, rot: -1 }); });
+    return svg + delivery.slip(it.kind, { note: it.note, to, aw: it.aw }, place);
+  }
   async function dlvTakeSlip() {
     dlv.busy = true;
     const it = dlv.item;
@@ -1297,14 +1324,9 @@
     else if (dlv.stage === 'open') dlv.item.kind === 'empty' ? dlvPutBack() : dlvTakeSlip();
     else if (dlv.stage === 'slip') dlvPutAway();
   });
-  addEventListener('keydown', e => {
-    if (!dlv.item || dlv.busy || e.key !== 'Escape') return;
-    e.preventDefault(); e.stopPropagation();
-    dlv.stage === 'slip' ? dlvPutAway() : dlvPutBack();
-  }, true);
   // a new night: the drawer shut and empty, nothing on its way
-  function dlvReset() { if (dlv.stage === 'slip') keyLayer.innerHTML = ''; dlv.queue = []; dlv.can = null; dlv.item = null; dlv.stage = 'idle'; dlv.travel = 0; dlv.busy = false; canLayer.innerHTML = ''; dlvCatcher.style.display = 'none'; drawDlv(); }
-  window.__dlv = { arrive: dlvArrive, reset: dlvReset, state: dlv,
+  function dlvReset() { if (dlv.stage === 'slip') keyLayer.innerHTML = ''; room.dlvSaid = false; dlv.incoming = null; dlv.queue = []; dlv.can = null; dlv.item = null; dlv.stage = 'idle'; dlv.travel = 0; dlv.busy = false; canLayer.innerHTML = ''; dlvCatcher.style.display = 'none'; drawDlv(); }
+  window.__dlv = { arrive: dlvArrive, reset: dlvReset, state: dlv, click: dlvDrawerClick, open: dlvOpen, take: dlvTakeSlip, putAway: dlvPutAway,   // (click, open, take, putAway: for trying it from the console)
     // night 3: the canister in the blackout, with the supervisor link down, for aw (the blackout calls this once it is built)
     aw: () => dlvArrive({ why: 'aw', kind: 'note', aw: true }) };
   drawDlv();
@@ -1405,9 +1427,31 @@
   });
 
   // ------------------------------------------------------------ sound
-  let audio = null, muted = false;
+  let audio = null, uiAudio = null, muted = false;
+  // the volume (the menu's settings): one gain in front of the speakers, in every context; kept in vigil.volume
+  let volume = .8;
+  try { const v = localStorage.getItem('vigil.volume'); if (v !== null && !Number.isNaN(+v)) volume = clamp(+v, 0, 1); } catch (e) {}
+  function makeAudio() {
+    const ctx = new (window.AudioContext || window.webkitAudioContext)();
+    if (ctx.master) return ctx;                       // (audit-sound.js hands back one context for all)
+    const master = ctx.createGain(); master.gain.value = volume; master.connect(ctx.destination);
+    try { Object.defineProperty(ctx, 'destination', { value: master }); ctx.master = master; } catch (e) {}
+    return ctx;
+  }
+  function setVolume(v) {
+    volume = clamp(v, 0, 1);
+    try { localStorage.setItem('vigil.volume', volume.toFixed(2)); } catch (e) {}
+    for (const c of [audio, uiAudio]) if (c?.master) c.master.gain.setTargetAtTime(volume, c.currentTime, .02);
+  }
+  // The room's sounds hold while the game is paused (pause.js suspends its context); what the menu plays, a switch heard
+  // while choosing one, goes through a context of its own.
   function ac() {
-    if (!audio) audio = new (window.AudioContext || window.webkitAudioContext)();
+    if (window.vigilTime?.paused) {
+      if (!uiAudio) uiAudio = makeAudio();
+      if (uiAudio.state === 'suspended') uiAudio.resume();
+      return uiAudio;
+    }
+    if (!audio) audio = window.vigilTime ? window.vigilTime.audio(makeAudio()) : makeAudio();
     if (audio.state === 'suspended') audio.resume();
     return audio;
   }
@@ -1607,13 +1651,103 @@
   }
   loadPack(sigName);
 
-  let limiter = null;
+  // ------------------------------------------------------------ the menu (Esc)
+  // Outside the room (Arnold, 2026-10-03): page chrome in the hum and sound buttons' manner, and the room behind it not
+  // dimmed or blurred, simply stopped (pause.js: the night's clock, the energy, every motion, Glenn mid-sentence, the
+  // sounds). Esc opens it from anywhere, at once; Esc again closes it and the room carries on from the same frame. While
+  // it is open nothing typed or clicked reaches the room. The game pauses by itself, the menu open, when the tab or the
+  // window loses focus (?nopause leaves that off, for testing in a hidden pane).
+  // resume; restart the night (asked once); settings: the volume, and the switches with three marked recommended.
+  const RECOMMENDED = ['cream', 'topre', 'creamyv2'];
+  const menu = (() => {
+    const el = $('menu'), panel = $('menu-panel'), sections = [...el.querySelectorAll('section')];
+    let opened = false, lastAudition = 0;
+    const show = id => { for (const s of sections) s.hidden = s.id !== id; focusFirst(); };
+    const focusables = () => [...el.querySelectorAll('section:not([hidden]) button, section:not([hidden]) input')];
+    const focusFirst = () => { const f = focusables(); (f.find(b => b.classList.contains('current')) || f[0])?.focus({ preventScroll: true }); };
+    function open(why = 'esc') {
+      if (opened) return;
+      opened = true;
+      window.vigilTime?.pause();
+      playtest(`menu open (${why})`);
+      el.hidden = false; show('menu-main');
+    }
+    function close() {
+      if (!opened) return;
+      opened = false; el.hidden = true;
+      playtest('menu closed');
+      document.activeElement?.blur?.();
+      window.vigilTime?.resume();
+    }
+    // the switches: recommended first, then the rest; a row heard when it is chosen, used when it is clicked or entered
+    function listSwitches() {
+      const ul = $('menu-switches'); ul.innerHTML = '';
+      const names = [...RECOMMENDED.filter(n => PACKS[n]), ...SIG_NAMES.filter(n => !RECOMMENDED.includes(n))];
+      names.forEach((n, i) => {
+        if (i === RECOMMENDED.length) { const li = document.createElement('li'); li.className = 'menu-more'; li.textContent = 'more'; ul.appendChild(li); }
+        const li = document.createElement('li'), b = document.createElement('button');
+        b.type = 'button'; b.dataset.pack = n; b.className = n === sigName ? 'current' : '';
+        b.innerHTML = `<span class="sw-name">${n}</span><span class="sw-note">${PACKS[n].note.replace(/[&<>]/g, '')}</span>${RECOMMENDED.includes(n) ? '<span class="sw-rec">recommended</span>' : ''}`;
+        b.addEventListener('focus', () => audition(n));
+        b.addEventListener('click', () => { setSignature(n); for (const x of ul.querySelectorAll('button')) x.classList.toggle('current', x.dataset.pack === n); playtest('switch: ' + n); audition(n, true); });
+        li.appendChild(b); ul.appendChild(li);
+      });
+    }
+    // a switch heard while the room is paused (ac() hands back the menu's own context)
+    function audition(name, force) {
+      const now = window.vigilTime ? window.vigilTime.realNow() : performance.now();
+      if (!force && now - lastAudition < 90) return;
+      lastAudition = now;
+      // (on the page's clock: the room's is stopped)
+      const later = window.vigilTime ? window.vigilTime.later : setTimeout;
+      loadPack(name).then(() => ['key-J', 'key-K'].forEach((id, i) => later(() => { click('key', false, id, { pack: name }); later(() => click('key', true, id, { pack: name }), 60); }, i * 120)));
+    }
+    el.addEventListener('click', e => {
+      const b = e.target.closest('button[data-act]'); if (!b) return;
+      const act = b.dataset.act;
+      if (act === 'resume') close();
+      else if (act === 'restart') show('menu-restart');
+      else if (act === 'restart-yes') { playtest('restart the night'); location.reload(); }
+      else if (act === 'settings') { listSwitches(); $('menu-volume').value = Math.round(volume * 100); show('menu-settings'); }
+      else if (act === 'back') show('menu-main');
+    });
+    // a click on the room behind the panel does nothing (the room is stopped); the panel keeps its own
+    el.addEventListener('pointerdown', e => { if (!panel.contains(e.target)) e.preventDefault(); });
+    $('menu-volume').addEventListener('input', e => { setVolume(e.target.value / 100); audition(sigName); });
+    // keys: Esc closes (and resumes), up/down move between the choices, Enter and Space act on one; nothing reaches the room
+    addEventListener('keydown', e => {
+      if (e.key === 'Escape' || e.code === 'Escape') { e.preventDefault(); e.stopImmediatePropagation(); opened ? close() : open(); return; }
+      if (!opened) return;
+      e.stopImmediatePropagation();
+      if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+        if (document.activeElement?.type === 'range') return;   // (the slider takes left/right; up/down move on)
+        e.preventDefault();
+        const f = focusables(), i = f.indexOf(document.activeElement);
+        f[(i + (e.key === 'ArrowDown' ? 1 : f.length - 1) + (i < 0 && e.key === 'ArrowUp' ? 1 : 0)) % f.length]?.focus();
+        return;
+      }
+      if (!['Enter', ' ', 'Tab', 'ArrowLeft', 'ArrowRight', 'Home', 'End', 'PageUp', 'PageDown'].includes(e.key)) e.preventDefault();
+    }, true);
+    addEventListener('keyup', e => { if (opened) e.stopImmediatePropagation(); }, true);
+    // the tab or the window loses focus: paused, the menu open (alt-tabbing never drains energy)
+    if (!new URLSearchParams(location.search).has('nopause')) {
+      addEventListener('blur', () => open('focus lost'));
+      document.addEventListener('visibilitychange', () => { if (document.hidden) open('tab hidden'); });
+    }
+    // fullscreen (the page never asks for it; a browser's own full screen, F11, isn't this): when an element's full screen
+    // is left, the browser has taken the Esc that left it, so the menu opens then, and one Esc still pauses
+    document.addEventListener('fullscreenchange', () => { if (!document.fullscreenElement) open('left full screen'); });
+    return { open, close, get opened() { return opened; } };
+  })();
+
+  const limiters = new Map();                         // one per audio context (the room's, the menu's)
   function keyLimiter(ctx) {
-    if (limiter) return limiter;
+    if (limiters.has(ctx)) return limiters.get(ctx);
     const comp = ctx.createDynamicsCompressor();
     comp.threshold.value = -8; comp.knee.value = 6; comp.ratio.value = 8; comp.attack.value = .003; comp.release.value = .1;
-    limiter = ctx.createBiquadFilter(); limiter.type = 'highpass'; limiter.frequency.value = 80; limiter.Q.value = .6;   // keeps any low rumble in a recording off the speakers
+    const limiter = ctx.createBiquadFilter(); limiter.type = 'highpass'; limiter.frequency.value = 80; limiter.Q.value = .6;   // keeps any low rumble in a recording off the speakers
     limiter.connect(comp).connect(ctx.destination);
+    limiters.set(ctx, limiter);
     return limiter;
   }
   // which recording a key uses: the dedicated ones for space, enter and backspace, otherwise its row
@@ -1960,7 +2094,8 @@
   }
 
   const WORD_DELETE = e => e.ctrlKey && (e.code === 'Backspace' || e.code === 'Delete');
-  const PASS_THROUGH = e => e.metaKey || /^F(5|11|12)$/.test(e.code) || (e.ctrlKey && !WORD_DELETE(e));
+  const CLEAR_LINE = e => e.ctrlKey && !e.altKey && !e.metaKey && (e.code === 'KeyU' || (!e.code && /^u$/i.test(e.key)));   // ctrl+u, as a shell has it (the browser's view-source is held back)
+  const PASS_THROUGH = e => e.metaKey || /^F(5|11|12)$/.test(e.code) || (e.ctrlKey && !WORD_DELETE(e) && !CLEAR_LINE(e));
   // Some virtual keyboards and automation send key events without a physical code; derive one from the key.
   const KEY_TO_CODE = { ' ': 'Space', '`': 'Backquote', '-': 'Minus', '=': 'Equal', '\\': 'Backslash', '[': 'BracketLeft',
     ']': 'BracketRight', ';': 'Semicolon', "'": 'Quote', ',': 'Comma', '.': 'Period', '/': 'Slash', 'Escape': 'Escape',
@@ -1973,6 +2108,7 @@
     if (id && !e.repeat) press(id);           // keycaps animate even for shortcuts we don't handle
     if (PASS_THROUGH(e)) return;
     if (WORD_DELETE(e)) { e.preventDefault(); term.input('DeleteWord'); hint.classList.add('gone'); return; }
+    if (CLEAR_LINE(e)) { e.preventDefault(); typeKey('ClearLine'); hint.classList.add('gone'); return; }
     if (e.key.length === 1 || HANDLED.has(code) || code.startsWith('Arrow')) {
       e.preventDefault();
       if (!e.repeat || e.key.length === 1 || code === 'Backspace' || code.startsWith('Arrow')) typeKey(e.key);
@@ -2002,6 +2138,7 @@
       e.preventDefault(); mouseKey = id; press(id);
       const letter = id.slice(4);
       const k = ID_TO_KEY[id] ?? (letter.length === 1 ? letter.toLowerCase() : null);
+      if (k === 'Escape') { setTimeout(() => menu.open(), 120); return; }   // the drawn esc, as the real one: the menu
       if (k !== null) term.input(k);
       hint.classList.add('gone');
     });
@@ -2228,7 +2365,7 @@
   const PROBLEM_CLS = { DOWN: 'pdown', HOT: 'phot', STUCK: 'pstuck', LOSS: 'ploss' };
   function typeIn(text) {
     if (!term.inShell() || !room.power) return;
-    term.input('Escape');
+    term.input('ClearLine');
     [...text].forEach((ch, i) => setTimeout(() => {
       const id = ch === ' ' ? 'key-Space' : 'key-' + ch.toUpperCase();
       press(id); setTimeout(() => release(id), 55); term.input(ch);
@@ -2783,7 +2920,7 @@
       runMailPicker();
     });
     function print(text = '', cls) { lines.push({ text, cls }); if (lines.length > MAX) lines.shift(); scrollBack = 0; render(); }
-    function setMode(m) { mode = m; if (m === 'shell') { frame = null; field = null; } render(); }
+    function setMode(m) { mode = m; if (m === 'shell') { frame = null; field = null; drain(); } render(); }
     // a line typed in by someone else, a character at a time, above the prompt: head is its fixed start (a tag),
     // then the text in cls; key(ch) is called as each character lands (its sound), pace(ch, next) says how long
     // until the next. Resolves when the line is all there.
@@ -2895,7 +3032,7 @@
     const COMMANDS = {
       // one help, everything in it (Arnold: one is all a player needs). It is longer than the tube, so the job
       // comes last, where it stays on screen above the prompt; the wheel scrolls back to the rest.
-      help: () => [...helpList('shell'), { text: 'keys: up/down history   tab completes', cls: 'dim' }, { text: '      ctrl+backspace deletes a word', cls: 'dim' },
+      help: () => [...helpList('shell'), { text: 'keys: up/down history   tab completes', cls: 'dim' }, { text: '      ctrl+backspace deletes a word, ctrl+u the line', cls: 'dim' }, { text: '      esc pauses', cls: 'dim' },
         '', ...helpList('room'), '', ...helpList('job'), { text: '(scroll up over the screen for the rest)', cls: 'dim' }],
       status: args => {
         glenn.complied('status');
@@ -3022,6 +3159,7 @@
         const { node } = resolve(file);
         if (!node || isDir(node)) return [`tail: ${file}: no such file`];
         if (!follow) return readFile(node).slice(-8);
+        print('(q or backspace: stop)', 'dim');
         readFile(node).slice(-6).forEach(l => print(l, 'dim'));
         mode = 'proc';
         const fn = l => { print(l, 'dim'); ledBurst(5); };
@@ -3224,9 +3362,10 @@
       return [];
     }
     // ---- ping one unit: a down one times out, a hot one answers slowly
+    // (a ping runs out by itself in a few seconds; what you type meanwhile waits for the prompt)
     async function runPingUnit(u) {
       mode = 'proc'; let stopped = false;
-      stopProc = () => { stopped = true; };
+      stopProc = null;
       const st = shift.state(u), U = UNITS[u];
       print(`PING ${u} (10.0.${U.side === 'left' ? 1 : 2}.${U.n}): 56 data bytes`);
       let got = 0;
@@ -3283,6 +3422,17 @@
       return { key: () => { if (ready) done(); }, cancel: () => clearInterval(t) };
     }
     const secs = ms => `${Math.round(ms / 1000)} s`;
+    // q in a cartridge game asks first (Arnold, 2026-10-03: a stray q must never cost a game): the game's top line becomes
+    // the question; q again quits, as a loss; any other key is the game's again (and does what it does there)
+    const QUIT_ASK = { text: ' quit? this counts as a loss. press q again to quit', cls: 'alert' };
+    function quitter(onQuit, redraw) {
+      let asking = false;
+      return { get asking() { return asking; }, key(k) {
+        if (k === 'q' || k === 'Q') { if (asking) { asking = false; onQuit(); } else { asking = true; redraw(); } return true; }
+        if (asking) { asking = false; redraw(); }
+        return false;
+      } };
+    }
     const energyDelta = e0 => { const d = Math.round((shift.energy - e0) * 100); return (d > 0 ? '+' : '') + d + '%'; };
 
     // ---- DEFRAG, from its cartridge (the game is defrag.js): put a stuck unit's files back together
@@ -3300,7 +3450,7 @@
       // four files, four shades you can't confuse at a glance, each with its own tint (all in the terminal font, so
       // all the same width). A whole file turns green. Under the board: the goal, and how far along each file is.
       const GLYPH = ['██', '▓▓', '▒▒', '░░'], LIMIT = 60000, t0 = performance.now();
-      let over = null, card = null, nextWrite = t0 + dial.writeEvery * 1000, flash = null, handed = [];   // flash: the unit's last write
+      let over = null, card = null, nextWrite = t0 + dial.writeEvery * 1000, flash = null, handed = [], quit = null;   // flash: the unit's last write
       const draw = () => {
         const now = performance.now(), left = Math.max(0, Math.ceil((LIMIT - (now - t0)) / 1000));
         const lit = flash && now < flash.until;
@@ -3319,7 +3469,7 @@
         }
         const border = '+' + '-'.repeat(d.COLS * 2) + '+';
         const joined = d.sizes.map((n, f) => `<span class="${tint(f)}">${GLYPH[f]} ${d.whole(f) ? 'whole' : `${d.together(f)}/${n}`}</span>`).join('   ');
-        frame = [{ text: ` defrag ${u}   ${String(left).padStart(2)}s   arrows + space: pick up, put down`, cls: 'dim' }, border, ...rows, border,
+        frame = [quit?.asking ? QUIT_ASK : { text: ` defrag ${u}   ${String(left).padStart(2)}s   arrows + space: pick up, put down`, cls: 'dim' }, border, ...rows, border,
           { html: `<span class="dim"> together:</span>  ${joined}` },
           { text: " goal: each file's blocks side by side, in one row.", cls: 'dim' }];
         render();
@@ -3363,9 +3513,10 @@
         clearInterval(timer); card?.cancel(); gameKey = null; gameName = null;
         print(over, over.startsWith('defrag complete') ? 'ok' : 'alert'); setMode('shell');
       };
+      quit = quitter(() => finish(false, 'quit'), () => draw());
       gameKey = k => {
         if (over) { card?.key(k); return; }
-        if (k === 'q' || k === 'Escape') { finish(false, 'aborted'); return; }
+        if (quit.key(k)) return;
         if (k === 'ArrowLeft') d.move(-1, 0); else if (k === 'ArrowRight') d.move(1, 0);
         else if (k === 'ArrowUp') d.move(0, -1); else if (k === 'ArrowDown') d.move(0, 1);
         else if (k === ' ') { beep(d.act() === 'pick' ? 700 : 900, .03, .02); if (d.won()) finish(true); }
@@ -3381,8 +3532,7 @@
       const units = Object.keys(UNITS).map(name => ({ name, util: .2 + Math.random() * .6, temp: 33 + rnd(9) }));
       const draw = () => {
         frame = [
-          { text: `top - ${stamp()}  128 units, ${shift.open().length} alerts  strikes ${shift.strikes}/${shift.STRIKE.max}  (any key exits)`, cls: 'dim' },
-          '',
+          { text: `top - ${stamp()}  128 units, ${shift.open().length} alerts  strikes ${shift.strikes}/${shift.STRIKE.max}`, cls: 'dim' },
           'UNIT  UTIL                      TEMP  STATE',
           ...units.map(u => {
             const st = shift.state(u.name), down = st && st.kind === 'DOWN', hot = st && st.kind === 'HOT';
@@ -3391,6 +3541,7 @@
             const state = st ? (st.fixing ? 'FIXING' : st.kind) : 'ok';
             return `${u.name.padEnd(5)} ${'█'.repeat(n)}${'░'.repeat(18 - n)} ${String(Math.round(util * 100)).padStart(3)}%  ${down ? '-- ' : temp.padStart(2) + 'C'}  ${state}`;
           }),
+          { text: ' q or backspace: close', cls: 'dim' },
         ];
         render();
       };
@@ -3406,7 +3557,7 @@
     // ---- ping: a pulse travels down a rack
     async function runPing(rack) {
       mode = 'proc'; let stopped = false;
-      stopProc = () => { stopped = true; };
+      stopProc = null;
       const list = leds.filter(l => l.rack === rack), dropping = shift.state('rack-' + rack)?.kind === 'LOSS';
       let lost = 0;
       print(`PING rack-${rack} (10.0.${rack === 'left' ? 1 : 2}.1): 56 data bytes`);
@@ -3424,7 +3575,7 @@
     // (the eighth lost-night piece: your name answers too, from 10.0.0.51, a unit that isn't in any rack)
     async function runPing23(name = '23') {
       mode = 'proc'; let stopped = false;
-      stopProc = () => { stopped = true; };
+      stopProc = null;
       print(`PING ${name} (${name === '23' ? '10.0.0.23' : '10.0.0.51'}): 56 data bytes`);   // your name: an address of its own (unit 23's leaned the mystery one way)
       for (let seq = 0; seq < 4 && !stopped; seq++) { await wait(900); print(`64 bytes from ${name}: seq=${seq} ttl=64 time=0.0 ms`); beep(1200, .03, .015); }
       if (!stopped) print('--- 4 packets transmitted, 4 received, 0% packet loss ---', 'dim');
@@ -3444,7 +3595,7 @@
       const g = createRoute({ hops: dial.hops, dead: dial.dead });
       if (window.dev) window.dev.game = g;
       const BOX = 48, LIMIT = 60000;
-      let t0 = performance.now(), started = false, over = null, card = null, timer = 0, handed = [], reached = 0;
+      let t0 = performance.now(), started = false, over = null, card = null, timer = 0, handed = [], reached = 0, quit = null;
       const centerText = (t, w) => { const pad = w - t.length; return ' '.repeat(Math.floor(pad / 2)) + t + ' '.repeat(Math.ceil(pad / 2)); };
       const draw = () => {
         const left = started ? Math.max(0, Math.ceil((LIMIT - (performance.now() - t0)) / 1000)) : 60;
@@ -3452,7 +3603,7 @@
         // one line above the board (the tube has no room below it): the clock, the hops, the drops; when the last hop
         // is reached, the port is open, in green
         const hops = g.open() ? '<span class="dfok">port open</span>' : `hops ${g.reached()}/${g.total}`;
-        frame = [{ html: ` <span class="dim">route ${rack}   ${String(left).padStart(2)}s</span>   ${hops}   <span class="dim">dropped ${g.drops()}/${g.DROPS}</span>` },
+        frame = [quit?.asking ? QUIT_ASK : { html: ` <span class="dim">route ${rack}   ${String(left).padStart(2)}s</span>   ${hops}   <span class="dim">dropped ${g.drops()}/${g.DROPS}</span>` },
           border, ...Array(g.ROWS).fill(empty), border];
         if (!started) frame[2 + Math.floor(g.ROWS / 2) - 2] = '|' + centerText('press an arrow key', BOX) + '|';
         field = { col: 1, row: 2, width: BOX, cols: g.COLS, rows: g.ROWS, cells: [
@@ -3505,9 +3656,10 @@
         clearTimeout(timer); card?.cancel(); gameKey = null; gameName = null; field = null;
         print(over, over.startsWith('route delivered') ? 'ok' : 'alert'); setMode('shell');
       };
+      quit = quitter(() => finish(false, 'quit'), () => draw());
       gameKey = k => {
         if (over) { card?.key(k); return; }
-        if (k === 'q' || k === 'Escape') { finish(false, 'aborted'); return; }
+        if (quit.key(k)) return;
         const name = { ArrowUp: 'up', ArrowDown: 'down', ArrowLeft: 'left', ArrowRight: 'right' }[k];
         if (!name) return;
         if (!started) { started = true; t0 = performance.now(); }
@@ -3560,7 +3712,8 @@
     }
 
     // ---- the mail picker (Arnold: like the switch picker, not numbers): up/down chooses, enter opens it on the
-    // tube, enter or esc goes back to the inbox, esc there leaves. Unread messages bright, read ones dim.
+    // tube, enter, q or backspace goes back to the inbox, q or backspace there closes it (esc is the menu's, everywhere).
+    // Unread messages bright, read ones dim.
     function runMailPicker() {
       mode = 'game'; gameName = 'mail';
       shift.hold('mail', true);                          // reading the mail costs no energy (Eugene's playtest, 2026-10-02)
@@ -3570,7 +3723,7 @@
       const asRows = lines => lines.flatMap(l => wrap(runsOf(l)).map(row => ({ html: row.map(r => r.cls ? `<span class="${r.cls}">${esc(r.text)}</span>` : esc(r.text)).join('') })));
       const draw = () => {
         if (reading) {
-          frame = [...asRows(inbox.open(sel)), '', { text: ' enter or esc: back to the inbox', cls: 'dim' }];
+          frame = [...asRows(inbox.open(sel)), '', { text: ' enter, q or backspace: back to the inbox', cls: 'dim' }];
         } else {
           const n = inbox.unread();
           const rows = box.map((m, i) => {
@@ -3579,26 +3732,26 @@
             return m.read ? { text: t, cls: 'dim' } : { text: t };
           });
           frame = [{ html: ` inbox  <span class="dim">${box.length} message${box.length === 1 ? '' : 's'}${n ? `, ${n} new` : ''}</span>` }, '', ...rows, '',
-            { text: ' up/down to choose, enter to open, esc to leave', cls: 'dim' }];
+            { text: ' up/down to choose, enter to open, q or backspace: close', cls: 'dim' }];
         }
         render();
       };
       const close = () => { shift.hold('mail', false); gameKey = null; gameName = null; stopProc = null; setMode('shell'); };
       stopProc = close;
       gameKey = k => {
-        if (reading) { if (k === 'Enter' || k === 'Escape' || k === 'q') { reading = false; draw(); } return; }
-        if (k === 'Escape' || k === 'q') { close(); return; }
+        if (reading) { if (k === 'Enter' || k === 'q' || k === 'Q' || k === 'Backspace') { reading = false; draw(); } return; }
+        if (k === 'q' || k === 'Q' || k === 'Backspace') { close(); return; }
         if (k === 'ArrowDown' || k === 'ArrowUp') { sel = (sel + (k === 'ArrowDown' ? 1 : -1) + box.length) % box.length; draw(); return; }
         if (k === 'Enter' && box[sel]) { reading = true; draw(); }
       };
       draw();
     }
 
-    // ---- the switch picker: up/down moves and plays a couple of keystrokes on that switch, enter picks it, esc
-    // leaves without changing anything, and typing narrows the list (by name or description)
+    // ---- the switch picker: up/down moves and plays a couple of keystrokes on that switch, enter picks it, q (or backspace
+    // with nothing typed) closes it without changing anything, and typing narrows the list (by name or description)
     function runSwitchPicker() {
       mode = 'game'; gameName = 'switch';
-      const start = sigName, VIS = crt.ROWS - 3;
+      const start = sigName, VIS = crt.ROWS - 4;
       let filter = '', sel = Math.max(0, SIG_NAMES.indexOf(sigName)), top = 0;
       const list = () => SIG_NAMES.filter(n => n.includes(filter) || PACKS[n].note.toLowerCase().includes(filter));
       // hear a switch without choosing it: play through it for a moment, then put the chosen one back
@@ -3620,14 +3773,14 @@
         frame = [{ text: ' switches (* in use)   up/down to listen, enter to pick', cls: 'dim' },
           { text: ` find: ${filter}` + (L.length ? '' : '   (nothing by that name)') },
           ...rows,
-          ...(L.length > VIS ? [{ text: ` ${top + 1}-${Math.min(L.length, top + VIS)} of ${L.length}`, cls: 'dim' }] : [])];
+          { text: ' q or backspace: close' + (L.length > VIS ? `   (${top + 1}-${Math.min(L.length, top + VIS)} of ${L.length})` : ''), cls: 'dim' }];
         render();
       };
       const close = () => { gameKey = null; gameName = null; stopProc = null; setMode('shell'); };
       stopProc = close;
       gameKey = k => {
         const L = list();
-        if (k === 'Escape') { close(); return; }
+        if (k === 'q' || k === 'Q' || (k === 'Backspace' && !filter)) { close(); return; }
         if (k === 'ArrowDown' || k === 'ArrowUp') {
           if (!L.length) return;
           sel = (sel + (k === 'ArrowDown' ? 1 : -1) + L.length) % L.length;
@@ -3638,7 +3791,7 @@
           close(); print(prompt() + 'switch ' + n); runCommand('switch ' + n); return;
         }
         if (k === 'Backspace') filter = filter.slice(0, -1);
-        else if (k === 'DeleteWord') filter = '';
+        else if (k === 'DeleteWord' || k === 'ClearLine') filter = '';
         else if (k.length === 1 && /[a-z0-9 -]/i.test(k)) filter = (filter + k.toLowerCase()).trimStart();
         else return;
         sel = 0; top = 0; draw();
@@ -3654,7 +3807,7 @@
       // a rally is the hits in one point, both paddles; the previous operator's best on this cart was 14
       // The cart's high score is the goal, arcade style: HI 14 M on the start screen, and every card puts your own best
       // beside it (YOU 9 · HI 14 M). Beat it and your score takes M.'s place on the card.
-      let rally = 0, longest = 0, card = null, best = 14, bestBy = 'm', mine = 0;
+      let rally = 0, longest = 0, card = null, best = 14, bestBy = 'm', mine = 0, quit = null;
       const t0 = performance.now(), pongE0 = shift.energy;
       try { best = +localStorage.getItem('nightshift.pongBest') || 14; bestBy = localStorage.getItem('nightshift.pongBestBy') || 'm'; mine = +localStorage.getItem('vigil.pongMine') || 0; } catch {}
       const hiText = (hi, by) => `HI ${hi} ${(by || 'm')[0].toUpperCase()}`;
@@ -3681,7 +3834,7 @@
           put(2, hiText(best, bestBy)); put(8, 'press up or down to serve');
         }
         const border = '+' + '-'.repeat(W) + '+';
-        frame = [{ text: ` pong   you ${you}   cpu ${cpu}   up/down, first to 5, q to quit`, cls: 'dim' }, border, ...g.map(r => '|' + r.join('') + '|'), border];
+        frame = [quit?.asking ? QUIT_ASK : { text: ` pong   you ${you}   cpu ${cpu}   up/down, first to 5, q to quit`, cls: 'dim' }, border, ...g.map(r => '|' + r.join('') + '|'), border];
         render();
       };
       const step = () => {
@@ -3709,11 +3862,12 @@
       };
       if (window.dev) window.dev.game = { point: () => { you++; }, rally: n => { longest = n; } };   // ?dev: score a point, set the longest rally, for trying the ending
       let handed = [];
-      const end = won => {
+      // quit: a lost match without the break (quitting at once would otherwise pay Pong's 3%)
+      const end = (won, quit = false) => {
         over = won ? 'you win' : 'cpu wins';
         clearInterval(t);
         if (won) handed = shift.won('PONG');
-        shift.rest();                                    // a game of Pong is a short break, win or lose
+        if (!quit) shift.rest();                         // a game of Pong is a short break, win or lose
         if (won) shift.paidBack(pongE0, shift.PONG_BREAK); // and a win pays for its minute
         updateVitals();
         const record = longest > best, was = hiText(best, bestBy);
@@ -3737,9 +3891,10 @@
       const t = setInterval(step, 85);
       draw();
       stopProc = () => { clearInterval(t); card?.cancel(); gameKey = null; gameName = null; print(`pong: you ${you}, cpu ${cpu}`); setMode('shell'); };
+      quit = quitter(() => { clearInterval(t); end(false, true); }, () => draw());
       gameKey = k => {
         if (over) { card?.key(k); return; }
-        if (k === 'q' || k === 'Escape') { stopProc(); return; }
+        if (quit.key(k)) return;
         if (possessed > 0 && (k === 'ArrowUp' || k === 'ArrowDown')) return;   // not yours, for a moment
         if (k === 'ArrowUp') py = Math.max(0, py - 1);
         else if (k === 'ArrowDown') py = Math.min(Hh - PL, py + 1);
@@ -3752,7 +3907,7 @@
     // ---- matrix: rain on the tube, then the room has a word with you
     function runMatrix() {
       mode = 'proc';
-      const W = 52, Hh = 14, GLYPHS = '0123456789ABCDEFGHJKLMNPQRSTUVWXYZ$#%&*+=<>/\|;:^~';
+      const W = 52, Hh = 13, GLYPHS = '0123456789ABCDEFGHJKLMNPQRSTUVWXYZ$#%&*+=<>/\|;:^~';
       const prevTheme = room.theme; setTheme('green');
       const cols = Array.from({ length: W }, () => ({ y: -rnd(Hh * 2), speed: .25 + Math.random() * .7, len: 4 + rnd(9), chars: Array.from({ length: Hh }, () => GLYPHS[rnd(GLYPHS.length)]) }));
       const t0 = performance.now();
@@ -3787,7 +3942,7 @@
           const pad = Math.max(0, Math.floor((W - msg.length - 2) / 2));
           rows[6] = { html: ' '.repeat(pad) + `<span class="mxmsg"> ${esc(msg)} </span>` };
         }
-        frame = rows; render();
+        frame = [...rows, { text: ' q or backspace: close', cls: 'dim' }]; render();
       };
       const t = setInterval(() => {
         for (const col of cols) { col.y += col.speed; if (col.y - col.len > Hh) { col.y = -rnd(6); col.speed = .25 + Math.random() * .7; col.len = 4 + rnd(9); } }
@@ -3921,7 +4076,7 @@
     // the welcome email from Vigil Systems: who you are and what the job is
     // login: the tube asks who you are the first time, and remembers you after that
     let loginDone = null;
-    function askLogin() { mode = 'login'; line = ''; render(); return new Promise(done => { loginDone = done; }); }
+    function askLogin() { mode = 'login'; line = ''; render(); drain(); return new Promise(done => { loginDone = done; }); }
     async function login() {
       account.loggingIn = true; updateVitals();
       if (!account.name) await askLogin();
@@ -3984,11 +4139,22 @@
       clockOn();                                        // last: whatever follows the boot shows before the clock runs
     }
 
+    // Typed ahead (Arnold, 2026-10-03: nothing typed may ever vanish): while the keyboard isn't yours (04:44), the tube is
+    // dark or booting (the night's end, the monitor off) or the shell is busy (a reboot, a brew, a ping), what you type
+    // waits here, and once the moment is over it lands at the prompt as if typed then: Enter included, so a command runs.
+    let pending = [];
+    function drain() {
+      setTimeout(() => {
+        if (!pending.length || locked || !(mode === 'shell' || mode === 'login')) return;
+        const keys = pending; pending = [];
+        for (const k of keys) term.input(k);
+      }, 0);
+    }
     return {
       input(key) {
-        if (locked) return;                              // someone else has the keyboard
         lastTyped = performance.now();
-        if (mode === 'off' || mode === 'boot') return;
+        if (window.dev) { const k = (window.dev.keys = window.dev.keys || []); k.push(`${key}:${mode}${locked ? ':locked' : ''}:${line}`); if (k.length > 400) k.shift(); }   // ?dev: the last 400 keys and where each went
+        if (locked || mode === 'off' || mode === 'boot' || (mode === 'proc' && !stopProc)) { if (pending.length < 400) pending.push(key); return; }
         scrollBack = 0;
         if (mode === 'login') {
           if (key === 'Enter') {
@@ -3999,12 +4165,13 @@
           }
           if (key === 'Backspace') line = line.slice(0, -1);
           else if (key === 'DeleteWord') line = line.replace(/\s*\S*\s*$/, '');
-          else if (key === 'Escape') line = '';
+          else if (key === 'ClearLine') line = '';
           else if (key.length === 1 && /[\p{L}\p{N} .'-]/u.test(key) && line.length < 24) line += key;
           render(); return;
         }
         if (mode === 'game') { gameKey?.(key); return; }
-        if (mode === 'proc') { stopProc?.(); return; }
+        // a live view (top, tail -f, matrix): q or backspace closes it; nothing else does
+        if (mode === 'proc') { if (key === 'q' || key === 'Q' || key === 'Backspace') stopProc?.(); return; }
         if (key === 'Enter') {
           const l = line; print(prompt() + l); line = '';
           if (l.trim()) { hist.push(l); if (hist.length > 100) hist.shift(); }
@@ -4013,7 +4180,7 @@
         else if (key === 'Backspace') line = line.slice(0, -1);
         else if (key === 'DeleteWord') line = line.replace(/\s*\S*\s*$/, '');
         else if (key === 'Tab') complete();
-        else if (key === 'Escape') line = '';
+        else if (key === 'ClearLine') line = '';           // ctrl+u (esc is the menu's)
         else if (key === 'ArrowUp') { if (hist.length) { if (histIdx === -1) { histDraft = line; histIdx = hist.length; } histIdx = Math.max(0, histIdx - 1); line = hist[histIdx]; } }
         else if (key === 'ArrowDown') { if (histIdx !== -1) { histIdx++; if (histIdx >= hist.length) { histIdx = -1; line = histDraft; } else line = hist[histIdx]; } }
         else if (key.length === 1 && line.length < 600) line += key;   // room for sentences; the tube wraps long lines
@@ -4031,11 +4198,13 @@
       leave(l) { lines.push(l); if (lines.length > MAX) lines.shift(); },
       ghost(ch) { if (mode !== 'shell') return false; line += ch; render(); return true; },
       unghost() { line = line.slice(0, -1); render(); },
-      hold(on) { locked = on; },
+      hold(on) { locked = on; if (!on) drain(); },
       takeLine() { const l = line; line = ''; render(); return l; },
-      giveLine(l) { line = l; render(); },
+      giveLine(l) { line = l; render(); drain(); },
       inShell: () => mode === 'shell',
-      clear() { lines = []; line = ''; scrollBack = 0; render(); },   // a reboot: nothing on the tube, nothing half-typed
+      // a reboot: nothing on the tube; what was half-typed goes ahead of anything typed in the dark, to come back at the
+      // next prompt (it never vanishes)
+      clear() { lines = []; pending = [...line, ...pending]; line = ''; scrollBack = 0; render(); },
       mount, setMode, boot, announce, typeLine,
     };
   })();

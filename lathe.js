@@ -7,7 +7,8 @@
    noGenerators: materials whose silhouettes along the axis are not drawn (a tube's inside seen through its mouth: its
    silhouette leaves the rim's inner ring on its tangent and runs a px or two from it, a sliver; tone alone shows it).
    open: profile indices of rings left without a line (where a piece is cut to be drawn in two parts).
-   matEdges: also a ring where the material changes along a flush run (bands too small to draw raised).
+   matEdges: also a ring where the material changes along a flush run (bands too small to draw raised); true for every
+   change, or a list of materials, for the changes into or out of those only.
    frame: { C, A, U, V } camera space: C the origin on the axis, A the axis, U and V across it, each one mm long.
    Returns items [{ depth, svg }] to be sorted far to near with other items. */
 (function () {
@@ -77,7 +78,7 @@
           const flush = () => { if (path.length > 1) d += 'M' + fmt(path).split(' ').join('L'); path = []; };
           for (const i of run) {
             const other = bands[nb]?.sec[i];
-            const edge = !other || !other.vis || dot(other.n, sec[i].n) < CREASE || (matEdges && (profile[nb][2] || 'body') !== (profile[j][2] || 'body'));
+            const edge = !other || !other.vis || dot(other.n, sec[i].n) < CREASE || (matEdges && (profile[nb][2] || 'body') !== (profile[j][2] || 'body') && (matEdges === true || matEdges.includes(profile[nb][2] || 'body') || matEdges.includes(profile[j][2] || 'body')));
             if (edge) { if (!path.length) path.push(screen[side][i]); path.push(screen[side][i + 1]); } else flush();
           }
           flush();
