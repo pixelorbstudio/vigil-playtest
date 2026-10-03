@@ -263,10 +263,13 @@
   // finale's last act): the night carries on without you, alerts land where you can't see them, and a few seconds
   // in, once a night, Glenn notices and leaves a line on the dark screen, an order; turning it back on is doing it.
   // The knob always works. On night 3, with the racks dark, turning it off means something else (design.md).
-  let darkTimer = 0, keptOnTimer = 0;
+  // powerTurn: each turn of the knob takes a ticket, and a warm-up that a later turn has overtaken stops where it is
+  // (Eugene's playtest: three quick clicks left the screen showing with the monitor off)
+  let darkTimer = 0, keptOnTimer = 0, powerTurn = 0;
   async function setPower(on) {
     if (room.power === on) return;
     room.power = on;
+    const turn = ++powerTurn, current = () => turn === powerTurn;
     clearTimeout(darkTimer); clearTimeout(keptOnTimer);
     // a few seconds dark, once a night: you hear him typing upstairs; the line is there when the screen comes back,
     // and its order is about what comes next (an order about the past can't be obeyed)
@@ -290,10 +293,12 @@
       screenG.classList.remove('off');
       degauss(true);
       await wait(350);
+      if (!current()) return;
       terminal.classList.remove('off');
       terminal.classList.add('warm');
       setTimeout(() => terminal.classList.remove('warm'), 1700);
       await wait(600);
+      if (!current()) return;
       term.setMode('shell');
     }
   }
@@ -313,6 +318,58 @@
     await wait(on ? 380 : 420);
     await setPower(on);
   }
+
+  // ---- the sticky note on the bezel (Eugene's playtest, 2026-10-02: a new player didn't know what to type at the login).
+  // "login: your name", in Caveat, on the left of the bezel, wholly on its white band (measured in the page: the band runs
+  // from x 274 to 334 at y 440 and leans 9 degrees with the lens; the note leans 6, as stuck on by hand). A flat fill
+  // from the drawing's greys and its one-pixel stroke. Once you are logged in a click takes it off: it is a stiff card
+  // in the room's camera, on the bezel's plane (depth 1000, as the slot), held by its top edge; it peels forward, lets go
+  // and drops behind the keyboard. Kept off (vigil.noteOff) until a new operator logs in.
+  const NOTE = { w: 50, h: 48, at: [276.5, 445], lean: 6 * Math.PI / 180, Z: 1000, F: 1500, EYE: [720, 813] };
+  const noteG = document.createElementNS(SVG, 'g');
+  noteG.id = 'login-note';
+  noteG.innerHTML = `<path d="M0 0H${NOTE.w}V${NOTE.h}H0Z" fill="#F4F4F2" stroke="#B4B4B4" stroke-width="1" stroke-linejoin="round"/>` +
+    `<text x="4" y="20" font-family="Caveat, cursive" font-size="12" fill="#6E6E6C">login:</text>` +
+    `<text x="3.5" y="36" font-family="Caveat, cursive" font-size="12" fill="#6E6E6C">your name</text>`;
+  $('chin-details').after(noteG);
+  // the card in the camera: top-left corner P0, its edges along U (across) and V (down), each one note unit long
+  function notePose(peel = 0, drop = 0) {
+    const k = NOTE.Z / NOTE.F, c = Math.cos(NOTE.lean), sn = Math.sin(NOTE.lean);
+    const P0 = [(NOTE.at[0] - NOTE.EYE[0]) * k, (NOTE.at[1] - NOTE.EYE[1]) * k + drop, NOTE.Z];
+    const U = [c * k, sn * k, 0], V0 = [-sn * k, c * k, 0];
+    const V = [V0[0] * Math.cos(peel), V0[1] * Math.cos(peel), -k * Math.sin(peel)];   // the bottom comes toward you
+    return { P0, U, V };
+  }
+  const noteProj = p => [NOTE.EYE[0] + NOTE.F * p[0] / p[2], NOTE.EYE[1] + NOTE.F * p[1] / p[2]];
+  function placeNote(peel, drop) {
+    const { P0, U, V } = notePose(peel, drop), at = (u, v) => noteProj([0, 1, 2].map(i => P0[i] + U[i] * u + V[i] * v));
+    const o = at(0, 0), a = at(NOTE.w, 0), b = at(0, NOTE.h), d = at(NOTE.w, NOTE.h);
+    noteG.setAttribute('transform', `matrix(${(a[0] - o[0]) / NOTE.w} ${(a[1] - o[1]) / NOTE.w} ${(b[0] - o[0]) / NOTE.h} ${(b[1] - o[1]) / NOTE.h} ${o[0]} ${o[1]})`);
+    return Math.min(o[1], a[1], b[1], d[1]);          // its highest corner (turned over, that is its bottom edge)
+  }
+  placeNote(0, 0);
+  let noteOff = false;
+  try { noteOff = localStorage.getItem('vigil.noteOff') === '1'; } catch (e) {}
+  if (noteOff) noteG.style.display = 'none';
+  noteG.style.cursor = 'pointer';
+  noteG.addEventListener('pointerdown', async e => {
+    e.preventDefault();
+    if (noteOff || account.loggingIn) return;           // it stays while you need it
+    noteOff = true; try { localStorage.setItem('vigil.noteOff', '1'); } catch (e) {}
+    playtest('login note taken off');
+    noteG.style.cursor = '';
+    // peel: the bottom lifts toward you, held at the top (a quarter second), then it lets go and falls, still turning,
+    // under gravity (9.81 m/s2 at 1.765 mm a camera unit), until it is behind the keyboard
+    await motion(260, u => placeNote(1.1 * u * u, 0));
+    const G = 9810 / 1.765 / 1e6, t0 = performance.now();
+    await new Promise(done => (function fall() {
+      const t = performance.now() - t0, top = placeNote(1.1 + t / 260, G * t * t / 2);
+      if (top > 900 || t > 1500) { noteG.style.display = 'none'; done(); return; }
+      requestAnimationFrame(fall);
+    })());
+  });
+  // a new operator finds it back on the bezel
+  function noteBack() { noteOff = false; try { localStorage.removeItem('vigil.noteOff'); } catch (e) {} placeNote(0, 0); noteG.style.display = ''; noteG.style.cursor = 'pointer'; }
 
   // ---- the cartridge slot on the chin, left of the power LED
   // The cartridge is a box drawn in the illustration's language (top face, side, front cap, thin grey
@@ -920,6 +977,294 @@
   addEventListener('keydown', e => { if (held && e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); putPhotoDown(); } }, true);
   fileHits.addEventListener('pointerdown', e => { if (!e.target.dataset?.hit) return; e.preventDefault(); liftPhoto(); });
 
+  // ---- the cheat sheet (Eugene's playtest, 2026-10-02; sheet.js): the right pedestal's top drawer opens as the others
+  // do, and in it lies a handwritten card: what the trouble means and its fix. Clicked, the card is lifted and held up
+  // in front of you, as the polaroid is; clicked again (or Escape), it goes back where it lay. Glenn mentions it once,
+  // in his introduction.
+  const CS = window.cheatSheet;
+  const sheet = { travel: 0, open: false, busy: false, held: false };
+  const [sheetUnder, sheetCardG, sheetOver, sheetHit] = ['under', 'card', 'over', 'hit'].map(n => { const g = document.createElementNS(SVG, 'g'); g.id = 'sheet-' + n; deskG.appendChild(g); return g; });
+  function drawSheet() {
+    const d = CS.drawer(sheet.travel);
+    sheetUnder.innerHTML = d.under;
+    // (only once its foot is out of the pedestal: before that it is inside, behind the desk)
+    const lying = sheet.travel >= CS.OPEN - CS.CARD.foot - .005 && !sheet.held ? CS.card(CS.lyingPose(sheet.travel), deskDrawer.roomF) : null;
+    sheetCardG.innerHTML = lying ? lying.svg : '';
+    sheetOver.innerHTML = d.over;
+    sheetHit.innerHTML = `<polygon data-hit="front" points="${CS.drawerHit(sheet.travel)}" fill="transparent"/>` + (lying && sheet.open ? `<polygon data-hit="card" points="${lying.hit}" fill="transparent"/>` : '');
+  }
+  const sheetTween = (ms, step) => new Promise(done => {
+    const t0 = performance.now();
+    (function frame(now) { const u = Math.min(1, (now - t0) / ms); step(u); drawSheet(); if (u < 1) requestAnimationFrame(frame); else done(); })(t0);
+  });
+  async function openSheet() {
+    if (sheet.open || sheet.busy) return;
+    sheet.open = true; sheet.busy = true;
+    playtest('cheat sheet drawer open');
+    drawerSound(true, DM.open.ms * DM.open.stopAt);
+    await sheetTween(DM.open.ms, u => { sheet.travel = CS.OPEN * DM.open.travel(u); });
+    sheet.busy = false;
+  }
+  async function closeSheet() {
+    if (!sheet.open || sheet.busy || sheet.held) return;
+    sheet.open = false; sheet.busy = true;
+    playtest('cheat sheet drawer closed');
+    drawerSound(false, DM.close.ms);
+    await sheetTween(DM.close.ms, u => { sheet.travel = CS.OPEN * DM.close.travel(u); });
+    sheet.busy = false;
+  }
+  const sheetCatcher = document.createElement('div');
+  Object.assign(sheetCatcher.style, { position: 'fixed', inset: '0', zIndex: '50', display: 'none', cursor: 'pointer' });
+  document.body.appendChild(sheetCatcher);
+  async function liftSheet() {
+    if (sheet.busy || sheet.held || !sheet.open) return;
+    sheet.busy = true; sheet.held = true;
+    playtest('cheat sheet: lifted');
+    const from = CS.lyingPose(sheet.travel), to = CS.heldPose(look.rest);
+    drawSheet();
+    keyDepth = DESK_FRONT_DEPTH;
+    await motion(700, u => {
+      const s = easeIO(u); keyDepth = DESK_FRONT_DEPTH + (.25 - DESK_FRONT_DEPTH) * s;
+      keyLayer.innerHTML = CS.card(between(from, to, s, v3.add(from.c, [0, -60, -20]), v3.add(to.c, [0, 30, 40])), roomOrFlat(s), 1 + .5 * s).svg;
+    });
+    sheetCatcher.style.display = '';
+    sheet.busy = false;
+  }
+  async function putSheetBack() {
+    if (!sheet.held || sheet.busy) return;
+    sheet.busy = true; sheetCatcher.style.display = 'none';
+    playtest('cheat sheet: put back');
+    const from = CS.heldPose(look.rest), to = CS.lyingPose(sheet.travel);
+    await motion(650, u => {
+      const s = easeIO(u); keyDepth = .25 + (DESK_FRONT_DEPTH - .25) * s;
+      keyLayer.innerHTML = CS.card(between(from, to, s, v3.add(from.c, [0, 30, 40]), v3.add(to.c, [0, -60, -20])), roomOrFlat(1 - s), 1.5 - .5 * s).svg;
+    });
+    keyLayer.innerHTML = '';
+    sheet.held = false; drawSheet();
+    sheet.busy = false;
+  }
+  sheetHit.addEventListener('pointerdown', e => {
+    const hit = e.target.dataset?.hit; if (!hit) return;
+    e.preventDefault(); hint.classList.add('gone');
+    if (hit === 'card') liftSheet(); else sheet.open ? closeSheet() : openSheet();
+  });
+  sheetCatcher.addEventListener('pointerdown', e => { e.preventDefault(); putSheetBack(); });
+  addEventListener('keydown', e => { if (sheet.held && e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); putSheetBack(); } }, true);
+  drawSheet();
+  // ---- the deliveries (design.md, "Deliveries"; drawing in delivery.js). Coffee is earned by working well and comes
+  // down the tube from upstairs: a rattle down through the wall, a thunk inside the desk, and the delivery drawer (the
+  // left pedestal's top drawer) nudges itself open about 4 inches. Pull it open: the canister lies across its back. Click
+  // the open drawer: the canister is lifted into your hands. Click it: the lid springs open (that logs compliance), and
+  // what came is a slip rolled in its mouth; click again and the slip comes out and is held up while the canister goes
+  // back in the drawer; click again and the slip goes back with it and the drawer shuts (sent back up, unseen). An issue
+  // slip puts a bag in the status line as the lid opens. Clicking anywhere but the canister while you hold it puts it
+  // back unopened; that is allowed and logs nothing. One canister at a time: another waits in the tube until the drawer is
+  // empty. shift.js decides when and what (streaks, the cap, the nights); night 3's canister for aw comes in the blackout.
+  const dlvG = document.createElementNS(SVG, 'g'), dlvHit = document.createElementNS(SVG, 'g');
+  dlvHit.classList.add('slot');
+  deskG.append(dlvG, dlvHit);
+  const canLayer = document.createElementNS(SVG, 'svg');
+  canLayer.id = 'can-flight';
+  canLayer.setAttribute('viewBox', '0 0 1440 2200'); canLayer.setAttribute('width', '1440'); canLayer.setAttribute('height', '2200');
+  Object.assign(canLayer.style, { position: 'absolute', left: '0', top: '0', width: '1440px', height: '2200px', overflow: 'visible', pointerEvents: 'none' });
+  lookEl.appendChild(canLayer);
+  let canDepth = DESK_FRONT_DEPTH;
+  function canParallax(cx, cy) { canLayer.style.transform = `translate(${(cx * canDepth * 9).toFixed(2)}px, ${(cy * canDepth * 6).toFixed(2)}px)`; }
+  // Glenn's notes (Arnold, 2026-10-02), in order and never repeated in a run (kept in vigil.notes; a new operator starts
+  // again); the one for aw in the blackout is the first, word for word, with "aw" for "chief"
+  const GLENN_NOTES = [
+    ['Three clean ones in a row, chief.', 'I see you down there.', 'Keep it up!'],
+    ["That's my operator!", 'Upstairs noticed, chief.'],
+    ['Clean work tonight, chief.', "Don't let it go to your head."],
+    ['Saw that, chief.', "Keep 'em coming."],
+  ];
+  const AW_NOTE = ['Three clean ones in a row, aw.', 'I see you down there.', 'Keep it up!'];
+  function nextNote() {
+    let i = 0; try { i = +localStorage.getItem('vigil.notes') || 0; localStorage.setItem('vigil.notes', String(i + 1)); } catch (e) {}
+    return GLENN_NOTES[i % GLENN_NOTES.length];          // (a run that loses nights could use all four; then they come round again)
+  }
+  const dlv = { travel: 0, can: null, item: null, stage: 'idle', lid: 0, busy: false, queue: [] };
+  function drawDlv() {
+    const D = delivery, showCan = dlv.can && dlv.travel >= D.OPEN - .005;
+    dlvG.innerHTML = D.drawer(dlv.travel, showCan ? D.far(D.drawerPose(dlv.travel), deskDrawer.roomF) : '');
+    dlvHit.innerHTML = `<polygon points="${D.drawerHit(dlv.travel)}" fill="transparent"/>`;
+  }
+  const dlvTween = (ms, to, ease = easeIO) => { const t0 = dlv.travel; return motion(ms, u => { dlv.travel = t0 + (to - t0) * ease(u); drawDlv(); }); };
+  // ---- its sounds, made here unless Arnold's recordings are in assets/sounds/fx (tube-rattle, tube-thunk, canister-open)
+  async function dlvSound(name) {
+    if (muted) return;
+    if (await fxBuffer(name)) { playFx(name, .6, -.45); return; }
+    const ctx = ac(), t = ctx.currentTime, pan = ctx.createStereoPanner(); pan.connect(ctx.destination);
+    const noise = (at, ms, f, q, v, shape = 3) => { const len = Math.floor(ctx.sampleRate * ms / 1000), buf = ctx.createBuffer(1, len, ctx.sampleRate), d = buf.getChannelData(0); for (let i = 0; i < len; i++) d[i] = (Math.random() * 2 - 1) * Math.pow(1 - i / len, shape); const s = ctx.createBufferSource(); s.buffer = buf; const bp = ctx.createBiquadFilter(); bp.type = 'bandpass'; bp.frequency.value = f; bp.Q.value = q; const g = ctx.createGain(); g.gain.value = v; s.connect(bp).connect(g).connect(pan); s.start(at); };
+    if (name === 'tube-rattle') {
+      // the carrier coming down through the wall from above: a hollow rush under it, its felt bands knocking the tube's
+      // joints, nearer and to the left (where the drawer is) as it comes, 1.4 s
+      pan.pan.setValueAtTime(-.1, t); pan.pan.linearRampToValueAtTime(-.45, t + 1.4);
+      const len = Math.floor(ctx.sampleRate * 1.45), buf = ctx.createBuffer(1, len, ctx.sampleRate), d = buf.getChannelData(0);
+      for (let i = 0; i < len; i++) { const u = i / len; d[i] = (Math.random() * 2 - 1) * Math.sin(Math.PI * Math.min(1, u * 1.15)) * (.4 + .6 * u); }
+      const s = ctx.createBufferSource(); s.buffer = buf; const bp = ctx.createBiquadFilter(); bp.type = 'bandpass'; bp.frequency.setValueAtTime(420, t); bp.frequency.linearRampToValueAtTime(260, t + 1.4); bp.Q.value = 1.4;
+      const g = ctx.createGain(); g.gain.value = .05; s.connect(bp).connect(g).connect(pan); s.start(t);
+      let at = .12; while (at < 1.35) { noise(t + at, 9, 1800 + Math.random() * 900, 3, .05 + .07 * at / 1.35); at += .06 + Math.random() * .12; }
+    } else if (name === 'tube-thunk') {
+      // it lands in the drawer: a dull knock inside the desk (measured: about a key press, -33 dB RMS; it was 16 dB over)
+      pan.pan.value = -.45;
+      const o = ctx.createOscillator(); o.type = 'sine'; o.frequency.setValueAtTime(110, t); o.frequency.exponentialRampToValueAtTime(48, t + .14);
+      const g = ctx.createGain(); g.gain.setValueAtTime(.0001, t); g.gain.exponentialRampToValueAtTime(.07, t + .006); g.gain.exponentialRampToValueAtTime(.001, t + .2);
+      o.connect(g).connect(pan); o.start(t); o.stop(t + .22);
+      noise(t, 40, 380, 1.2, .035, 4);
+    } else if (name === 'canister-open') {
+      // the lid springing open: a small tock and the hinge's tick
+      pan.pan.value = 0;
+      noise(t, 22, 1500, 2.5, .12, 4); noise(t + .05, 10, 3200, 3, .05, 3);
+    }
+  }
+  // ---- the flow
+  async function dlvArrive(item) {
+    if (dlv.can || dlv.item || dlv.busy) { dlv.queue.push(item); return; }
+    dlv.busy = true;
+    playtest(`delivery: ${item.why}, ${item.kind}`);
+    dlvSound('tube-rattle');
+    await wait(1450);
+    dlvSound('tube-thunk');
+    dlv.can = item; drawDlv();
+    await wait(260);
+    if (dlv.travel < delivery.NUDGE) { drawerSound(true, 380); await dlvTween(420, delivery.NUDGE, u => 1 - Math.pow(1 - u, 3)); }
+    dlv.busy = false;
+  }
+  function dlvNext() { if (dlv.queue.length && !dlv.can && !dlv.item) setTimeout(() => { const n = dlv.queue.shift(); if (n) dlvArrive(n); }, 1500); }
+  async function dlvDrawerClick() {
+    if (dlv.busy || dlv.item) return;
+    hint.classList.add('gone');
+    if (dlv.travel < delivery.OPEN - .001) {             // pull it open
+      dlv.busy = true; playtest('delivery drawer open');
+      drawerSound(true, DM.open.ms * DM.open.stopAt); await dlvTween(DM.open.ms, delivery.OPEN);
+      dlv.busy = false; return;
+    }
+    if (dlv.can) return dlvLift();
+    dlv.busy = true; playtest('delivery drawer closed');   // empty: push it shut
+    drawerSound(false, DM.close.ms); await dlvTween(DM.close.ms, 0);
+    dlv.busy = false;
+  }
+  dlvHit.addEventListener('pointerdown', e => { e.preventDefault(); dlvDrawerClick(); });
+  // poses for the flight, as app.js's between() takes them ({ c, A, B }: unit axes) and back to delivery.js's frames
+  const toFlight = p => ({ c: p.C, A: v3.norm(p.A), B: v3.norm(p.U) });
+  const fromFlight = f => { const k = delivery.MM; return { C: f.c, A: v3.mul(f.A, k), U: v3.mul(f.B, k), V: v3.mul(v3.cross(f.A, f.B), k) }; };
+  // drawn between the drawer and your hands: small (under 1.4 px a mm) it is the drawer's plain canister, square-ended
+  // with flush bands (raised ones put lines a px or two apart); nearer, the held one
+  // Held, it is posed as you would hold it looking at the screen and slid down with the view (looking down slides the
+  // picture, it doesn't turn the camera; posed lower in the room it was seen from above, the lid edge-on): near (0..1)
+  // blends the room's projection into the near camera's and the slide in with it
+  const heldProj = s => { const pr = roomOrFlat(s); return p => { const q = pr(p); return [q[0], q[1] + look.rest * s]; }; };
+  function drawCan(pose, s, lid, what) {
+    const project = heldProj(s), A = pose.A, C = pose.C;
+    const k = deskDrawer.proj(C), k2 = deskDrawer.proj(v3.add(C, A)), pxmm = Math.hypot(k2[0] - k[0], k2[1] - k[1]);
+    // (the slip stands 40 mm out of the mouth: with the lid shut, or nearly, it is inside, under it)
+    canLayer.innerHTML = pxmm < 1.4 ? delivery.far(pose, project) : delivery.held(lid > Math.PI / 3 ? what : 'empty', pose, project, lid);
+  }
+  async function dlvFly(toHands, lid0, lid1, ms, what) {
+    const a = toFlight(delivery.drawerPose(delivery.OPEN)), b = toFlight(delivery.heldPose(0));
+    const [p0, p1] = toHands ? [a, b] : [b, a];
+    await motion(ms, u => {
+      const s = easeIO(u), pose = fromFlight(between(p0, p1, s, v3.add(p0.c, [0, -40, 20]), v3.add(p1.c, [0, 20, 30])));
+      const near = toHands ? s : 1 - s; canDepth = DESK_FRONT_DEPTH + (.25 - DESK_FRONT_DEPTH) * near;
+      drawCan(pose, near, lid0 + (lid1 - lid0) * s, what);
+    });
+  }
+  const dlvCatcher = document.createElement('div');
+  Object.assign(dlvCatcher.style, { position: 'fixed', inset: '0', zIndex: '50', display: 'none', cursor: 'pointer' });
+  document.body.appendChild(dlvCatcher);
+  const LID_OPEN = 125 * Math.PI / 180;
+  async function dlvLift() {
+    dlv.busy = true; dlv.item = dlv.can; dlv.can = null; drawDlv();
+    playtest('canister: lifted');
+    await dlvFly(true, 0, 0, 750, 'slip');
+    dlv.stage = 'held'; dlv.lid = 0; dlvCatcher.style.display = ''; dlv.busy = false;
+  }
+  // a click while you hold it: on the canister, open it; anywhere else, put it back as it is
+  function onCan(e) {
+    const r = stage.getBoundingClientRect(), x = (e.clientX - r.left) * 1440 / r.width, y = (e.clientY - r.top) * 1080 / r.height + look.y;
+    const ps = [...canLayer.innerHTML.matchAll(/(-?\d+\.?\d*),(-?\d+\.?\d*)/g)].map(m => [+m[1], +m[2]]);
+    if (!ps.length) return false;
+    const xs = ps.map(p => p[0]), ys = ps.map(p => p[1]);
+    return x > Math.min(...xs) - 10 && x < Math.max(...xs) + 10 && y > Math.min(...ys) - 10 && y < Math.max(...ys) + 10;
+  }
+  const heldNow = () => delivery.heldPose(0);
+  async function dlvOpen() {
+    dlv.busy = true;
+    const it = dlv.item, what = it.kind === 'empty' ? 'empty' : 'slip';
+    dlvSound('canister-open');
+    // opening it is accepting it: the log notes it, quietly (design.md: so gifts accepted show in night 3's grep)
+    logLine('vigild[1]: operator compliance: yes (delivery opened)');
+    playtest(`canister: opened (${it.kind})`);
+    if (it.kind === 'beans') giveBeans(1, it.why === 'bag' ? "glenn's bag" : 'delivery');
+    if (it.kind === 'note') it.note = it.aw ? AW_NOTE : nextNote();
+    // it springs open: past wide open and back
+    await motion(300, u => { const sp = 1 - Math.pow(1 - u, 3) * Math.cos(u * Math.PI * 1.5); dlv.lid = LID_OPEN * Math.min(1.06, sp); drawCan(heldNow(), 1, dlv.lid, what); });
+    dlv.lid = LID_OPEN; drawCan(heldNow(), 1, dlv.lid, what);
+    dlv.stage = 'open'; dlv.busy = false;
+  }
+  function slipFor(it, place) { return delivery.slip(it.kind, { note: it.note, to: account.name || account.user, aw: it.aw }, place); }
+  async function dlvTakeSlip() {
+    dlv.busy = true;
+    const it = dlv.item;
+    playtest('slip: taken out' + (it.kind === 'note' ? ` (${it.note[0]})` : ''));
+    // the slip comes up out of the mouth as the canister goes back down into the drawer, its lid shutting
+    const tip = delivery.rollTip(heldNow(), heldProj(1)), cy = look.rest + 470;
+    const a = toFlight(heldNow()), b = toFlight(delivery.drawerPose(delivery.OPEN));
+    await motion(700, u => {
+      const s = easeIO(u), pose = fromFlight(between(a, b, s, v3.add(a.c, [0, 20, 30]), v3.add(b.c, [0, -40, 20])));
+      canDepth = .25 + (DESK_FRONT_DEPTH - .25) * s;
+      drawCan(pose, 1 - s, LID_OPEN * (1 - s), 'empty');
+      canLayer.innerHTML += slipFor(it, { cx: tip[0] + (720 - tip[0]) * s, cy: tip[1] + (cy - tip[1]) * s, k: .08 + .92 * s });
+    });
+    dlv.can = { spent: true }; drawDlv();
+    canDepth = .25; canLayer.innerHTML = slipFor(it, { cx: 720, cy, k: 1 });
+    dlv.stage = 'slip'; dlv.busy = false;
+  }
+  // done with it: the slip goes back down into the canister in the drawer, and the drawer shuts (sent back up)
+  async function dlvPutAway() {
+    dlv.busy = true; dlvCatcher.style.display = 'none';
+    const it = dlv.item, cy = look.rest + 470, to = deskDrawer.roomF(delivery.drawerPose(delivery.OPEN).C);
+    playtest('slip: put away');
+    await motion(550, u => { const s = easeIO(u); canDepth = .25 + (DESK_FRONT_DEPTH - .25) * s; canLayer.innerHTML = slipFor(it, { cx: 720 + (to[0] - 720) * s, cy: cy + (to[1] - cy) * s, k: 1 - .92 * s }); });
+    canLayer.innerHTML = '';
+    await dlvShut();
+  }
+  async function dlvShut() {
+    dlv.item = null; dlv.stage = 'idle';
+    drawerSound(false, DM.close.ms); await dlvTween(DM.close.ms, 0);
+    dlv.can = null; drawDlv(); dlv.busy = false;
+    dlvNext();
+  }
+  // put it back as it is: unopened, it waits in the drawer to be taken again; opened (an empty one), it goes back up
+  async function dlvPutBack() {
+    dlv.busy = true; dlvCatcher.style.display = 'none';
+    const it = dlv.item, opened = dlv.stage === 'open';
+    playtest(opened ? 'canister: put back (opened)' : 'canister: put back unopened');
+    await dlvFly(false, dlv.lid, 0, 650, opened ? 'empty' : 'slip');
+    canLayer.innerHTML = '';
+    if (opened) { dlv.can = { spent: true }; drawDlv(); await dlvShut(); return; }
+    dlv.can = it; dlv.item = null; dlv.stage = 'idle'; dlv.lid = 0; drawDlv(); dlv.busy = false;
+  }
+  dlvCatcher.addEventListener('pointerdown', e => {
+    e.preventDefault();
+    if (dlv.busy) return;
+    if (dlv.stage === 'held') onCan(e) ? dlvOpen() : dlvPutBack();
+    else if (dlv.stage === 'open') dlv.item.kind === 'empty' ? dlvPutBack() : dlvTakeSlip();
+    else if (dlv.stage === 'slip') dlvPutAway();
+  });
+  addEventListener('keydown', e => {
+    if (!dlv.item || dlv.busy || e.key !== 'Escape') return;
+    e.preventDefault(); e.stopPropagation();
+    dlv.stage === 'slip' ? dlvPutAway() : dlvPutBack();
+  }, true);
+  // a new night: the drawer shut and empty, nothing on its way
+  function dlvReset() { dlv.queue = []; dlv.can = null; dlv.item = null; dlv.stage = 'idle'; dlv.travel = 0; dlv.busy = false; canLayer.innerHTML = ''; dlvCatcher.style.display = 'none'; drawDlv(); }
+  window.__dlv = { arrive: dlvArrive, reset: dlvReset, state: dlv,
+    // night 3: the canister in the blackout, with the supervisor link down, for aw (the blackout calls this once it is built)
+    aw: () => dlvArrive({ why: 'aw', kind: 'note', aw: true }) };
+  drawDlv();
+
 
   // ------------------------------------------------------------ parallax
   let tx = 0, ty = 0, cx = 0, cy = 0;
@@ -939,6 +1284,7 @@
     updateGlare(cx, cy);
     deskParallax(cx, cy);
     handParallax(cx, cy);
+    canParallax(cx, cy);
     keyParallax(cx, cy);
     requestAnimationFrame(tick);
   })();
@@ -1675,8 +2021,30 @@
       let at = 0;                                        // heard, not seen: his keys, upstairs, at his pace
       for (let i = 0; i < t.length; i++) { const ch = t[i]; setTimeout(() => key(ch, MUFFLED), at); at += pace(ch, t[i + 1]); }
     }
+    // a question waiting for its answer: the next line typed. yes replays a short version of the tutorial (it is teaching:
+    // the energy holds); no, and he lets it go; anything else is just a command, and the question lapses
+    let asked = null;
+    function answer(raw) {
+      if (!asked) return false;
+      const a = raw.trim().toLowerCase().replace(/[.!]+$/, '');
+      asked = null;
+      if (/^(y|yes|yeah|yep|sure|ok|okay|please)$/.test(a)) {
+        playtest('refresher: yes');
+        teach("Trouble shows up right here, and in the strip along the top of the screen.",
+          "Not responding: reboot it. Running hot: reroute it. Anything stranger, the cheat sheet in the top right drawer has you covered.",
+          "Type top to see every rack. That's the drill, chief.");
+        return true;
+      }
+      if (/^(n|no|nope|nah|no thanks)$/.test(a)) { playtest('refresher: no'); say('Alright, chief.'); return true; }
+      return false;
+    }
     // false if said before; otherwise the promise of his saying it (truthy, so it reads as "said")
-    function once(k, ...texts) { if (taught.has(k)) return false; remember(k); return say(...texts); }
+    // (what he says once is teaching: the energy holds while he says it, Eugene's playtest, 2026-10-02)
+    function once(k, ...texts) { if (taught.has(k)) return false; remember(k); return teach(...texts); }
+    function teach(...texts) {
+      const sh = shift; sh?.hold('glenn', true);
+      return say(...texts).then(() => sh?.hold('glenn', false));
+    }
     // the start of the night: an introduction the first time, a welcome back after that
     // one arrival pending at a time: a logout cancels the last operator's
     function arriveIn(ms) { clearTimeout(arrivalTimer); arrivalTimer = setTimeout(arrive, ms); }
@@ -1687,13 +2055,16 @@
       arrived = true;
       if (taught.has('intro')) {
         if (!taught.has('basics')) remember('basics');
-        say(shift.initial().length ? "Evening, chief. You're walking into a mess tonight." : 'Evening, chief! Back already. You know the drill.');
+        // a returning night: he offers a refresher (Eugene's playtest, 2026-10-02); the next thing you type answers him
+        say(shift.initial().length ? "Evening, chief. You're walking into a mess tonight. Need a refresher? (yes/no)" : 'Back already, chief. Need a refresher? (yes/no)');
+        asked = 'refresher';
         return;
       }
       once('intro',
         "Evening, chief! Glenn here. I'm your night supervisor.",
         "I'm upstairs, keeping an eye on the same racks you are.",
-        "It's quiet for now. When something breaks, it'll tell you right here. Be a pal and check status now and then.");
+        "It's quiet for now. When something breaks, it'll tell you right here. Be a pal and check status now and then.",
+        "There's a cheat sheet in the top right drawer of your desk, if you ever need it. And type top to see every rack at once.");
       order('status', 'be a pal and check status now and then');
       // the cartridges: if you haven't found the drawer by yourself in a while
       // the cartridges, Pong first (a Pong win is the fast way to DEFRAG): after the first fix, once it's quiet and
@@ -1721,7 +2092,7 @@
     function forget() { taught.clear(); arrived = false; clearTimeout(drawerTimer); clearTimeout(arrivalTimer); try { localStorage.removeItem('vigil.glenn'); } catch (e) {} }
     // clocked out and back in: he arrives again ("Back already.")
     function newNight() { arrived = false; }
-    return { say, leave, once, arrive, arriveIn, forget, newNight, order, complied, broke, did, basicsDone, checkBasics, taught: k => taught.has(k) };
+    return { say, leave, once, arrive, arriveIn, forget, newNight, order, complied, broke, did, basicsDone, checkBasics, answer, taught: k => taught.has(k) };
   })();
 
   // ------------------------------------------------------------ mail
@@ -1808,6 +2179,22 @@
     const list = (RACK_LEDS[rack] || []).slice().sort((a, b) => a.p.getBBox().y - b.p.getBBox().y);
     list.forEach((l, i) => setTimeout(() => { ledClass(l, 'burst', false); void l.p.getBBox(); ledClass(l, 'burst', true); setTimeout(() => ledClass(l, 'burst', false), 340); }, i * 18));
   }
+  // a unit's LEDs clicked: "status <unit>" typed into the prompt (Eugene's playtest, 2026-10-02), quickly, on your keys;
+  // whatever was half-typed goes. Enter is still yours to press.
+  const PROBLEM_CLS = { DOWN: 'pdown', HOT: 'phot', STUCK: 'pstuck', LOSS: 'ploss' };
+  function typeIn(text) {
+    if (!term.inShell() || !room.power) return;
+    term.input('Escape');
+    [...text].forEach((ch, i) => setTimeout(() => {
+      const id = ch === ' ' ? 'key-Space' : 'key-' + ch.toUpperCase();
+      press(id); setTimeout(() => release(id), 55); term.input(ch);
+    }, i * 42));
+  }
+  for (const [u, U] of Object.entries(UNITS)) {
+    const g = $(`rack-${U.side}-unit-${U.n}`); if (!g) continue;
+    g.classList.add('unit-hit');
+    g.addEventListener('pointerdown', e => { e.preventDefault(); hint.classList.add('gone'); playtest('led click ' + u); typeIn('status ' + u); });
+  }
   function fixLanded(u) {
     if (!UNITS[u]) { unitLed(u, null); return; }
     playFx('relay-click', .5, UNITS[u].side === 'left' ? -.6 : .6);
@@ -1883,6 +2270,7 @@
     shiftT = performance.now();
     // a new night starts with only what the night hands over: Pong in the drawer, the rest found again
     tray.carts = shift.startsWith.filter(l => l !== room.cart).map(label => ({ slot: CARTS[label].slot, label, lift: 0 })); drawDrawer();
+    window.__dlv?.reset();
     if (room.cart && room.cart !== 'PONG') shift.find(room.cart);   // one still in the slot stays yours
     eyeStrain();
     if (room.coffee < 1) setCoffee(1);                 // a new night starts with a full mug
@@ -1916,6 +2304,8 @@
         : e.n === 2 ? `${e.unit}. ${e.min} minutes. That's two, chief. Let's not make it three.`
         : `${e.unit}. That's three, chief. I'm sorry. Be a pal and go on home.`);
       beep(294, .14, .035); setTimeout(() => beep(220, .2, .035), 170);   // lower and slower than an alert
+    } else if (e.type === 'delivery') {
+      window.__dlv?.arrive({ why: e.why, kind: e.kind });
     } else if (e.type === 'relieved' || e.type === 'dawn') {
       endOfNight(e.report);
     } else if (e.type === 'found') {
@@ -2045,6 +2435,11 @@
     skip: (t = 385) => { shift.skip(t); for (const u in UNITS) unitLed(u, null); },   // 385: 05:25
     // the file drawer: unlock it (as if the key had turned), file the photo, or put it all back as it was on night 1
     beans: (n = 1) => giveBeans(n, 'dev'),           // beans in, with the chirp
+    // the login note posed by hand (its peel in radians, its drop in camera units), for checking its motion; note() puts it back
+    note: (peel, drop) => { noteG.style.display = ''; return placeNote(peel || 0, drop || 0); },
+    // a delivery now: kind beans | note | empty | aw; the streak so far
+    delivery: (kind = 'beans') => kind === 'aw' ? window.__dlv.aw() : window.__dlv.arrive({ why: 'dev', kind }),
+    get streak() { return shift.streak; },
     chirp: () => beanChirp(),
     file: { unlock: () => { file.unlocked = true; file.key = 'lock'; keepFile(); drawFile(); }, keyToDesk: () => { file.key = 'desk'; keepFile(); drawDeskKey(); }, keyFromPong: () => keyFromPong(), fileIt: () => { file.filed = true; file.filedShift = shiftNo; keepFile(); drawFile(); }, nextShift: () => { shiftNo++; drawFile(); },
       reset: () => { Object.assign(file, { unlocked: false, filed: false, clicks: 0, travel: 0, open: false, key: 'none', turn: 1 }); keepFile(); drawFile(); drawDeskKey(); }, get state() { return { ...file }; } },
@@ -2188,7 +2583,7 @@
     const e = shift.energy;
     if (PLAYTEST && Math.floor(e * 10) !== energyTenth) { energyTenth = Math.floor(e * 10); playtest(`energy below ${(energyTenth + 1) * 10}%`); }
     // (the shift starts before the terminal exists; the first status is drawn once it does, below)
-    try { term.setStatus({ energy: e, beans: shift.beans, low: e < .3, strikes: shift.strikes, mail: { unread: inbox.unread() }, beansLit: performance.now() < beansLitUntil }); } catch (err) { return; }
+    try { term.setStatus({ energy: e, beans: shift.beans, low: e < .3, strikes: shift.strikes, mail: account.loggingIn ? null : { unread: inbox.unread() }, problems: account.loggingIn || !shift ? null : shift.open().map(o => ({ unit: o.unit, kind: o.kind, fixing: o.fixing })), beansLit: performance.now() < beansLitUntil }); } catch (err) { return; }
     // tired: below 30% the screen softens, and below 25% the keys lag (see typeKey)
     termCanvas.style.filter = e < .3 ? `blur(${((.3 - e) / .3 * 1.1).toFixed(2)}px)` : '';
   }
@@ -2458,9 +2853,17 @@
       // comes last, where it stays on screen above the prompt; the wheel scrolls back to the rest.
       help: () => [...helpList('shell'), { text: 'keys: up/down history   tab completes', cls: 'dim' }, { text: '      ctrl+backspace deletes a word', cls: 'dim' },
         '', ...helpList('room'), '', ...helpList('job'), { text: '(scroll up over the screen for the rest)', cls: 'dim' }],
-      status: () => {
+      status: args => {
         glenn.complied('status');
         const open = shift.open();
+        if (args[0]) {
+          const n = args[0].toUpperCase(), r = args[0].toLowerCase();
+          const o = open.find(x => x.unit === n || x.unit === r);
+          if (!UNITS[n] && !RACK_LEDS[r]) return [`status: ${args[0]}: no such unit   units: ${Object.keys(UNITS).join(' ')}`];
+          if (!o) return [{ text: `${UNITS[n] ? n : r}  ok   ${UNITS[n] ? unitName(n) : 'the whole rack'}, answering`, cls: 'ok' }];
+          const what = o.fixing ? 'being seen to' : { DOWN: 'not responding', HOT: 'running hot', STUCK: 'fragmented: jobs piling up', LOSS: 'dropping packets' }[o.kind];
+          return [{ html: `${o.unit.padEnd(4)} <span class="${PROBLEM_CLS[o.kind]}">${o.fixing ? 'FIXING' : o.kind}</span>  ${esc(what)}, ${Math.round(o.forMin)} min` }, { text: `     ${unitName(o.unit)}`, cls: 'dim' }];
+        }
         return [
           `${shift.clock()}  on shift ${hm(shift.t)}  strikes ${shift.strikes ? `${shift.strikes} of ${shift.STRIKE.max}` : 'none'}`,
           ...(open.length ? open.map(o => `${o.unit.padEnd(4)} ${(o.fixing ? 'FIXING' : o.kind).padEnd(7)}${String(Math.round(o.forMin)).padStart(3)} min   ${unitName(o.unit)}`)
@@ -2694,6 +3097,7 @@
     function runCommand(raw) {
       const [cmd, ...args] = raw.trim().split(/\s+/);
       if (!cmd) return;
+      if (glenn.answer(raw)) return;                     // (his question: "Need a refresher? (yes/no)")
       const fn = COMMANDS[cmd.toLowerCase()];
       const out = fn ? fn(args) : [`${cmd}: command not found`];
       out.forEach(l => typeof l === 'string' ? print(l) : l.html !== undefined ? (lines.push(l), render()) : print(l.text, l.cls));
@@ -3114,6 +3518,7 @@
     // tube, enter or esc goes back to the inbox, esc there leaves. Unread messages bright, read ones dim.
     function runMailPicker() {
       mode = 'game'; gameName = 'mail';
+      shift.hold('mail', true);                          // reading the mail costs no energy (Eugene's playtest, 2026-10-02)
       const box = inbox.items();
       let sel = Math.max(0, box.findIndex(m => !m.read)), reading = false;
       const P = { from: 14, subject: 27 };
@@ -3133,7 +3538,7 @@
         }
         render();
       };
-      const close = () => { gameKey = null; gameName = null; stopProc = null; setMode('shell'); };
+      const close = () => { shift.hold('mail', false); gameKey = null; gameName = null; stopProc = null; setMode('shell'); };
       stopProc = close;
       gameKey = k => {
         if (reading) { if (k === 'Enter' || k === 'Escape' || k === 'q') { reading = false; draw(); } return; }
@@ -3473,7 +3878,7 @@
     let loginDone = null;
     function askLogin() { mode = 'login'; line = ''; render(); return new Promise(done => { loginDone = done; }); }
     async function login() {
-      account.loggingIn = true;
+      account.loggingIn = true; updateVitals();
       if (!account.name) await askLogin();
       else {
         await wait(300); print(LOGIN + account.name); beep(660, .035);
@@ -3492,11 +3897,11 @@
       } catch (e) {}
     }
     // the shift clock runs from here: after the login and the welcome
-    function clockOn() { account.loggingIn = false; shiftT = performance.now(); drawFile(); }
+    function clockOn() { account.loggingIn = false; shiftT = performance.now(); drawFile(); updateVitals(); }   // (the mail shows from here)
     // logout: back to the login prompt, as someone else if you like
     async function logout() {
-      account.name = null; account.user = 'operator'; account.mailRead = false; glenn.forget();
-      try { localStorage.removeItem('vigil.operator'); localStorage.removeItem('vigil.mailRead'); localStorage.removeItem('vigil.night'); } catch (e) {}
+      account.name = null; account.user = 'operator'; account.mailRead = false; glenn.forget(); noteBack();
+      try { localStorage.removeItem('vigil.operator'); localStorage.removeItem('vigil.mailRead'); localStorage.removeItem('vigil.night'); localStorage.removeItem('vigil.notes'); } catch (e) {}
       lines = []; mode = 'boot'; render();
       await wait(500);
       await login();

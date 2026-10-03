@@ -24,6 +24,9 @@
     // the night supervisor: a tag in inverse red, and their words in red; nothing else on the tube is red
     'sup-tag': { color: '#22308f', bg: '#ff9d9d', glow: 'none' }, sup: { color: '#ffb4b4', glow: '#ff7a7a' },
     'rs-won': { color: '#22308f', bg: '#b8f0c2', glow: 'none' }, 'rs-lost': { color: '#22308f', bg: '#ffd28a', glow: 'none' },
+    // the kinds of trouble, in the tube's own tones and never red (red is the supervisor's and the strikes'): DOWN the
+    // phosphor at its brightest, HOT amber (as its LED), STUCK violet, LOSS cyan
+    pdown: { color: '#ffffff', glow: '#ffffff' }, phot: { color: '#ffd28a' }, pstuck: { color: '#c7b8ff' }, ploss: { color: '#8fd3ff' },
   };
 
   window.createCRT = function ({ canvas, host, warp }) {
@@ -93,7 +96,23 @@
     // where the envelope was last drawn (design units), for the page's click
     let mailHit = null;
     // beansLit: the bean and its count bright for a moment, the one blink when beans come in
-    function drawStatus({ energy, beans, low, strikes = 0, mail = null, beansLit = false }, pal) {
+    // problems: every open problem, live, on a thin strip under the status line (Eugene's playtest, 2026-10-02), left to
+    // right in the order they came: "L47 DOWN · L20 HOT", each kind in its tone, one being fixed dim. Null: not drawn.
+    function drawProblems(list, pal) {
+      const PF = 13, y = 41;
+      f.font = `${PF}px ${FAMILY}`; f.shadowColor = pal.glow; f.shadowBlur = 5 * K;
+      let x = PAD_X;
+      const put = (t, color) => { f.fillStyle = color; f.fillText(t, x, y); x += f.measureText(t).width; };
+      if (!list.length) put('all units nominal', pal.dim);
+      list.forEach((p, i) => {
+        if (i) put('  ·  ', pal.dim);
+        put(p.unit + ' ', p.fixing ? pal.dim : pal.text);
+        const st = CLS[{ DOWN: 'pdown', HOT: 'phot', STUCK: 'pstuck', LOSS: 'ploss' }[p.kind]] || {};
+        if (p.fixing) put('FIXING', pal.dim); else { f.shadowColor = st.glow || pal.glow; put(p.kind, st.color || pal.text); f.shadowColor = pal.glow; }
+      });
+    }
+    function drawStatus({ energy, beans, low, strikes = 0, mail = null, beansLit = false, problems = null }, pal) {
+      if (problems) drawProblems(problems, pal);
       const SF = 15, y = 22;                            // font size and the line's centre, in design units
       f.font = `${SF}px ${FAMILY}`;
       const w = t => f.measureText(t).width;
