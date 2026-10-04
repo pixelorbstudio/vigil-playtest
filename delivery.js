@@ -30,7 +30,64 @@
   const DLV = { x0: -40, x1: 200, y0: 1352, y1: 1462, depth: .22, wall: 8, wd: .01 };   // (wd .01: the front's top 7.4 px nudged; at .008, 5.9)
   const NUDGE = .12, OPEN = .17;
   const PULL_DX = 30;                                    // its pull right of centre: centred, the 4:3 frame's edge cut it once nudged
-  function drawer(out, withCan) {
+
+  // ---- the internal post (Arnold, 2026-10-03, round 3): the drawer is the post's receiving station, built into the desk,
+  // and the room shows it. A carrier tube up through the floor in the knee space's back left corner, into the back of the
+  // left pedestal out of sight behind the rail; a small metal label under the pull; an arrival flag on the front.
+  // ---- the pipe: 76 mm across (the canister is 60), a floor flange and a clamp to the pedestal's side 30 cm up; a surface
+  // of revolution in the room's camera (as the canister is), in the pedestal's greys a step darker (it is in the dark),
+  // clipped to the knee space's opening (the rail and the pedestals' fronts are in front of it). It only exists below the
+  // rail, so it never covers a rack LED. (The flange 10 mm high and 62 across: at the stills' 6 mm and 55 its lines stood
+  // 4 px apart at this distance, the rule is 6. The clamp is a band flush with the pipe, edged by a ring each side: standing
+  // proud, its top face, seen from above, put its two rings 3 px apart.)
+  const PIPE = { x: 262, d: -.285, r: 38, flange: 62, flangeH: 10, clampAt: 300, clampH: 30 };
+  const PIPE_MATS = { pipe: ['#E2E2E0', '#D6D6D4'], flange: ['#DEDEDC', '#D2D2D0'], clamp: ['#E6E6E4', '#DADAD8'] };
+  let PIPE_SVG = null;
+  function pipe() {
+    if (PIPE_SVG) return PIPE_SVG;
+    const dd = window.deskDrawer, P = PIPE, cam = p => dd.toCamF(p);
+    const C = cam([P.x, 2030, P.d]), top = cam([P.x, 1420, P.d]);
+    const ax = [top[0] - C[0], top[1] - C[1], top[2] - C[2]], H = Math.hypot(...ax) / MM, A = V3.unit(ax), U = [1, 0, 0], V = V3.cross(A, U);
+    const frame = { C, A: V3.mul(A, MM), U: V3.mul(U, MM), V: V3.mul(V, MM) };
+    const prof = [[0, 0, 'flange'], [0, P.flange, 'flange'], [P.flangeH, P.flange, 'pipe'], [P.flangeH, P.r, 'pipe'], [P.clampAt, P.r, 'clamp'],
+      [P.clampAt + P.clampH, P.r, 'pipe'], [H, P.r, 'pipe'], [H, 0]];
+    const items = window.lathe.lathe(prof, frame, dd.roomF, PIPE_MATS, { sectors: 1440, split: false, seal: true, matEdges: ['clamp'] });
+    // the knee space's opening, its edges sampled on the desk's bend (every px across, as the drawers' runs are)
+    const F = dd.F, run = (a, b) => { const n = Math.max(1, Math.ceil(Math.hypot(b[0] - a[0], b[1] - a[1]))); return Array.from({ length: n }, (_, k) => F([0, 1, 2].map(j => a[j] + (b[j] - a[j]) * k / n))); };
+    const q = [[220, 1490, 0], [1220, 1490, 0], [1220, 2030, 0], [220, 2030, 0]], knee = q.flatMap((p, i) => run(p, q[(i + 1) % 4]));
+    return (PIPE_SVG = `<clipPath id="post-knee"><polygon points="${fmt(knee)}"/></clipPath><g clip-path="url(#post-knee)">${window.lathe.compose(items)}</g>`);
+  }
+  // ---- the label: a small metal plate under the pull, INTERNAL POST / STORES L2 engraved in the company's lettering (the
+  // monospace your folder's tab is typed in), grey, two rivets. On the front at its depth.
+  const LABEL = { cx: (DLV.x0 + DLV.x1) / 2 + PULL_DX, y0: DLV.y0 + 64, w: 78, h: 26 };   // (at y0 + 60 and 84 wide, its corner came 3.4 to 4.5 px from the pull's post)
+  const fine = (a, b, step = .25) => { const F = window.deskDrawer.F, n = Math.max(1, Math.ceil(Math.hypot(b[0] - a[0], b[1] - a[1]) / step)); return Array.from({ length: n }, (_, k) => F([0, 1, 2].map(j => a[j] + (b[j] - a[j]) * k / n))); };
+  const fineQuad = q => q.flatMap((p, i) => fine(p, q[(i + 1) % q.length]));
+  function label(out) {
+    const F = window.deskDrawer.F, { cx, y0, w, h } = LABEL, x0 = cx - w / 2, x1 = cx + w / 2, y1 = y0 + h;
+    const plate = fineQuad([[x0, y0, out], [x1, y0, out], [x1, y1, out], [x0, y1, out]]);
+    // each line placed by an affine fit at its own baseline on the bent front
+    const text = (t, x, y, size, ls) => { const o = F([x, y, out]), a = F([x + 1, y, out]), b = F([x, y + 1, out]); return `<text transform="matrix(${[a[0] - o[0], a[1] - o[1], b[0] - o[0], b[1] - o[1], o[0], o[1]].map(v => v.toFixed(4)).join(' ')})" text-anchor="middle" font-family="ui-monospace, Consolas, monospace" font-size="${size}" letter-spacing="${ls}" fill="#8E8E8C">${t}</text>`; };
+    // the rivets: circles on the front, sampled every quarter pixel through the bend
+    const rivet = (x, y) => { const r = 1.6, m = Math.ceil(2 * Math.PI * r / .25); return `<polygon points="${fmt(Array.from({ length: m }, (_, k) => F([x + r * Math.cos(2 * Math.PI * k / m), y + r * Math.sin(2 * Math.PI * k / m), out])))}" fill="#E6E6E4" ${INK}/>`; };
+    return `<polygon points="${fmt(plate)}" fill="#E8E8E6" ${INK}/>` + text('INTERNAL POST', cx, y0 + 11, 6.6, .3) + text('STORES L2', cx, y0 + 20.5, 6.2, .9) + rivet(x0 + 8, y0 + h / 2) + rivet(x1 - 8, y0 + h / 2);   // (inset 8: at 6 a rivet's edge stood 4.4 px from the plate's)
+  }
+  // ---- the arrival flag: a steel arm on a rivet near the front's top right corner, a small plate at its end, in the
+  // drawer's greys (red is Glenn's). up: 0 down (lying along the front, pointing left) .. 1 up (standing above the drawer's
+  // top edge); it swings up with the thunk and drops when the drawer is pulled open. It rides on the front, 3 mm proud.
+  const FLAG = { px: DLV.x1 - 18, py: DLV.y0 + 16, arm: 38, w: 6, plate: [17, 14] };
+  function flag(out, up) {
+    const F = window.deskDrawer.F, a = Math.PI + Math.PI / 2 * up, z = out + .003;   // 0 points right; pi left, 3pi/2 up
+    const rot = ([u, v]) => [FLAG.px + u * Math.cos(a) - v * Math.sin(a), FLAG.py + u * Math.sin(a) + v * Math.cos(a), z];
+    const { arm, w, plate } = FLAG;
+    // one outline, the arm stepping out into its plate (drawn as two, the arm's edges ran 3 px inside the plate's), the
+    // plate a tone darker inside it; the pivot a boss wider than the arm, so the arm's edges meet it square, not tangent
+    const x0 = arm - 2, x1 = arm + plate[0] - 2, ph = plate[1] / 2;
+    const outline = fineQuad([[0, -w / 2], [x0, -w / 2], [x0, -ph], [x1, -ph], [x1, ph], [x0, ph], [x0, w / 2], [0, w / 2]].map(rot));
+    const plateQ = fineQuad([[x0, -ph], [x1, -ph], [x1, ph], [x0, ph]].map(rot));
+    const r = 5, m = Math.ceil(2 * Math.PI * r / .25), piv = Array.from({ length: m }, (_, k) => F([FLAG.px + r * Math.cos(2 * Math.PI * k / m), FLAG.py + r * Math.sin(2 * Math.PI * k / m), z]));
+    return `<polygon points="${fmt(outline)}" fill="#DEDEDC"/><polygon points="${fmt(plateQ)}" fill="#D2D2D0"/><polygon points="${fmt(outline)}" fill="none" ${INK}/><polygon points="${fmt(piv)}" fill="#E6E6E4" ${INK}/>`;
+  }
+  function drawer(out, withCan, up = 0) {
     const F = window.deskDrawer.F, { x0, x1, y0, y1, wall, wd } = DLV;
     const poly = (ps, fill, extra = '') => `<polygon points="${fmt(ps.map(F))}" fill="${fill}" ${extra}/>`;
     // straight runs sampled every 10 px across, so the desk's bend curves them
@@ -52,7 +109,7 @@
     }
     s += poly(quad([x0, y0, front], [x1, y0, front], [x1, y1, front], [x0, y1, front]), '#F4F4F2', INK);
     s += window.deskDrawer.pullAt((x0 + x1) / 2 - 48 + PULL_DX, (x0 + x1) / 2 + 48 + PULL_DX, y0 + 33, y0 + 46, front);
-    return s;
+    return s + label(front) + flag(front, up);
   }
   // where a click takes the drawer: its front, and the opening above it once it is out
   function drawerHit(out) {
@@ -185,23 +242,46 @@
   // place: { cx, cy, k } (centre on the stage, and scale: 1 is held up, smaller on its way out of the canister)
   const SLIP = { w: 560, h: 300, rot: -3 };
   const esc = t => String(t).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
-  function slip(kind, { note = [], to = '', aw = false, no = 412 } = {}, place = { cx: 720, cy: 470, k: 1 }) {
+  // The slips carry story, never explain (Arnold, 2026-10-03, round 3), one step stranger each time: an issue slip reused
+  // (struck: "TO: aw" struck through with typed X's, "aw" still readable under them, your name typed after it); one with a
+  // carbon of an old request showing faintly through it (carbon: M.'s, typed a few pixels off the slip's own lines, in a
+  // grey between the print and the rules); a misrouted memo ('memo') and a timesheet ('timesheet'), papers of their own
+  // that come with a slip and are held up behind it, the timesheet clipped to it.
+  const CARBON = ['REQUEST: 1 BAG · REASON: can\'t stay awake', 'TO: m · 2019-04-01'];
+  function slip(kind, { note = [], to = '', aw = false, no = 412, struck = false, carbon = false } = {}, place = { cx: 720, cy: 470, k: 1 }) {
     const { w, h } = SLIP, a = (place.rot ?? SLIP.rot) * Math.PI / 180, c = Math.cos(a) * place.k, si = Math.sin(a) * place.k;
     const P2 = (x, y) => [place.cx + (x - w / 2) * c - (y - h / 2) * si, place.cy + (x - w / 2) * si + (y - h / 2) * c];
     const m = [c, si, -si, c, ...P2(0, 0)].map(v => v.toFixed(4)).join(' ');
     const MONO = 'font-family="ui-monospace, Consolas, monospace"';
-    const GREY = '#8E8E8C', RULE = '#D2D2D0', TYPE = '#4A4A48', RED = '#D9706D';
+    const GREY = '#8E8E8C', RULE = '#D2D2D0', TYPE = '#4A4A48', RED = '#D9706D', FAINT = '#C4C4C2';
     const text = (x, y, t, attrs) => `<text x="${x}" y="${y}" ${MONO} ${attrs}>${esc(t)}</text>`;
     const rule = (y, x0 = 28, x1 = w - 28) => `<path d="M${x0},${y}L${x1},${y}" stroke="${RULE}" stroke-linecap="round" vector-effect="non-scaling-stroke"/>`;
     let inner = text(28, 42, 'VIGIL SYSTEMS', `font-weight="700" font-size="17" letter-spacing="3" fill="${GREY}"`);
     if (kind === 'beans') {
+      // the carbon first, under the slip's own typing: two lines a few pixels off the slip's, where its own lines leave room
+      if (carbon) inner += text(31, 110, CARBON[0], `font-size="13" letter-spacing=".3" fill="${FAINT}"`) + text(31, 186, CARBON[1], `font-size="13" letter-spacing=".3" fill="${FAINT}"`);
       inner += text(w - 28, 42, 'SITE 4', `font-weight="600" font-size="13" letter-spacing="2" fill="${GREY}" text-anchor="end"`);
       inner += text(28, 66, 'ISSUE SLIP · STORES', `font-size="12" letter-spacing="1.5" fill="${GREY}"`);
       inner += text(w - 28, 66, 'No. ' + String(no).padStart(4, '0'), `font-size="12" letter-spacing="1" fill="${GREY}" text-anchor="end"`);
       inner += rule(84);
       inner += text(28, 150, 'ISSUED: 1 BAG · NIGHT SHIFT BLEND', `font-size="22" letter-spacing=".5" fill="${TYPE}"`);
       inner += rule(210);
-      inner += text(28, 246, 'TO', `font-size="11" letter-spacing="1.5" fill="${GREY}"`) + text(70, 246, to, `font-size="14" fill="${TYPE}"`);
+      inner += text(28, 246, 'TO', `font-size="11" letter-spacing="1.5" fill="${GREY}"`);
+      // struck: the old name typed over with X's, the new one after it
+      inner += struck ? text(70, 246, 'aw', `font-size="14" fill="${TYPE}"`) + text(71, 249, 'XX', `font-size="14" fill="${GREY}"`) + text(104, 246, to, `font-size="14" fill="${TYPE}"`)   // (the X's a little lower and a shade lighter, a second pass of a tired ribbon: aw stays readable under them)
+        : text(70, 246, to, `font-size="14" fill="${TYPE}"`);
+    } else if (kind === 'memo') {
+      inner += text(w - 28, 42, 'MEMO', `font-weight="600" font-size="13" letter-spacing="2" fill="${GREY}" text-anchor="end"`);
+      inner += text(28, 66, 'INTEROFFICE · SITE 4', `font-size="12" letter-spacing="1.5" fill="${GREY}"`);
+      inner += rule(84);
+      ['TO: STORES', 'RE: SITE 4 OPERATOR', 'PREPARE FILE'].forEach((t, i) => { inner += text(28, 136 + i * 40, t, `font-size="20" letter-spacing=".5" fill="${TYPE}"`); });
+    } else if (kind === 'timesheet') {
+      inner += text(w - 28, 42, 'SITE 4', `font-weight="600" font-size="13" letter-spacing="2" fill="${GREY}" text-anchor="end"`);
+      inner += text(28, 66, 'TIMESHEET · NIGHTS', `font-size="12" letter-spacing="1.5" fill="${GREY}"`);
+      inner += rule(84);
+      inner += text(28, 142, 'HOURS THIS SHIFT: 6.5', `font-size="20" letter-spacing=".5" fill="${TYPE}"`);
+      inner += text(28, 190, 'HOURS ON RECORD: 11,408', `font-size="20" letter-spacing=".5" fill="${TYPE}"`);
+      inner += rule(230);
     } else {
       inner += text(w - 28, 42, 'INTEROFFICE', `font-weight="600" font-size="13" letter-spacing="2" fill="${GREY}" text-anchor="end"`);
       inner += text(28, 66, 'FROM: SUPERVISOR, NIGHTS', `font-size="12" letter-spacing="1.2" fill="${GREY}"`);
@@ -212,6 +292,16 @@
     }
     return `<polygon points="${fmt([[0, 0], [w, 0], [w, h], [0, h]].map(([x, y]) => P2(x, y)))}" fill="#FAFAF9" ${INK}/><g transform="matrix(${m})">${inner}</g>`;
   }
+  // a paper clip over the slips' top edges, near the left (holding the timesheet to the slip in front of it): a wire
+  // bent in three U's (a Gem clip), one line, its four legs 6 px apart, in the slip's own frame (top: how far above the
+  // front slip's top edge the one behind's is)
+  function clip(place, top) {
+    const { w, h } = SLIP, a = (place.rot ?? SLIP.rot) * Math.PI / 180, c = Math.cos(a) * place.k, si = Math.sin(a) * place.k;
+    const o = [place.cx - w / 2 * c + h / 2 * si, place.cy - w / 2 * si - h / 2 * c], m = [c, si, -si, c, ...o].map(v => v.toFixed(4)).join(' ');
+    const x = 64, y0 = -top - 14, y1 = 40;             // from above the paper behind to below the front one's edge
+    const d = `M${x + 6},${y1 - 20}V${y0 + 11}A3,3 0 0 1 ${x + 12},${y0 + 11}V${y1 - 6}A6,6 0 0 1 ${x},${y1 - 6}V${y0 + 9}A9,9 0 0 1 ${x + 18},${y0 + 9}V${y1 - 30}`;
+    return `<g transform="matrix(${m})"><path d="${d}" fill="none" stroke="#B4B4B4" stroke-linecap="round" stroke-linejoin="round" vector-effect="non-scaling-stroke"/></g>`;
+  }
 
-  window.delivery = { DLV, NUDGE, OPEN, CAN, drawer, drawerHit, drawerPose, far, heldPose, held, rollTip, slip, MM };
+  window.delivery = { DLV, NUDGE, OPEN, CAN, PIPE, LABEL, FLAG, drawer, drawerHit, drawerPose, far, heldPose, held, rollTip, slip, clip, pipe, label, flag, MM };
 })();

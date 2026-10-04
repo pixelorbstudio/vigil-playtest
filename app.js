@@ -1113,16 +1113,49 @@
     ['Saw that, chief.', "Keep 'em coming."],
   ];
   const AW_NOTE = ['Three clean ones in a row, aw.', 'I see you down there.', 'Keep it up!'];
+  // Night 2's notes (Arnold, 2026-10-03, round 3): Glenn possessive, picked in order, never repeated in a run (vigil.notes2);
+  // night 3 has none (the link is down; aw's is the old one)
+  const GLENN_NOTES_2 = [
+    ['I like knowing where you are, chief.'],
+    ['Stay where I can see you, chief.'],
+    ["You'd tell me if you were thinking", 'of leaving, right, chief?'],
+    ["Nobody's stayed as long as you, chief.", "Let's keep it that way."],
+  ];
   function nextNote() {
-    let i = 0; try { i = +localStorage.getItem('vigil.notes') || 0; localStorage.setItem('vigil.notes', String(i + 1)); } catch (e) {}
-    return GLENN_NOTES[i % GLENN_NOTES.length];          // (a run that loses nights could use all four; then they come round again)
+    const two = shift.level >= 2, key = two ? 'vigil.notes2' : 'vigil.notes', list = two ? GLENN_NOTES_2 : GLENN_NOTES;
+    let i = 0; try { i = +localStorage.getItem(key) || 0; localStorage.setItem(key, String(i + 1)); } catch (e) {}
+    return list[i % list.length];                        // (a run that loses nights could use all four; then they come round again)
   }
-  const dlv = { travel: 0, can: null, item: null, stage: 'idle', lid: 0, busy: false, queue: [] };
+  // What each canister carries besides (design.md, "The slips carry story"), by night and by which canister it is:
+  // night 1, Glenn's 02:00 bag a reused slip (aw's, struck through) and the second streak's beans a carbon of M.'s old
+  // request; night 2, the first streak's slip comes with a misrouted memo and the 02:00 bag's with a timesheet. The first
+  // canister of night 1 is the normal, so the rest has something to differ from. (The second streak's on night 2 is empty.)
+  function storyOf(item) {
+    if (item.aw) return null;
+    const n = shift.level;
+    if (n === 1) return item.why === 'bag' ? 'reused' : item.why === 'streak' && item.n === 2 && item.kind === 'beans' ? 'carbon' : null;
+    if (n === 2) return item.why === 'bag' ? 'timesheet' : item.why === 'streak' && item.n === 1 ? 'memo' : null;
+    return null;
+  }
+  // the arrival flag: 0 down, 1 up (up with the thunk, down as the drawer is pulled open)
+  const dlv = { travel: 0, can: null, item: null, stage: 'idle', lid: 0, busy: false, queue: [], flag: 0 };
   function drawDlv() {
     const D = delivery, showCan = dlv.can && dlv.travel >= D.OPEN - .005;
-    dlvG.innerHTML = D.drawer(dlv.travel, showCan ? D.far(D.drawerPose(dlv.travel), deskDrawer.roomF) : '');
+    dlvG.innerHTML = D.drawer(dlv.travel, showCan ? D.far(D.drawerPose(dlv.travel), deskDrawer.roomF) : '', dlv.flag);
     dlvHit.innerHTML = `<polygon points="${D.drawerHit(dlv.travel)}" fill="transparent"/>`;
   }
+  // the flag swings up past upright and settles (a spring), or falls back along the front
+  async function flagTo(up) {
+    if (up === (dlv.flag > .5 ? 1 : 0) && Math.abs(dlv.flag - up) < .01) return;
+    const f0 = dlv.flag;
+    if (up) { dlvSound('flag'); await motion(380, u => { dlv.flag = f0 + (1 - f0) * (1 - Math.pow(1 - u, 3) * Math.cos(u * Math.PI * 2.5)); drawDlv(); }); }
+    else await motion(220, u => { dlv.flag = f0 * (1 - u * u); drawDlv(); });
+    dlv.flag = up; drawDlv();
+  }
+  // the pipe in the knee space, drawn once, under everything the desk draws after its own front
+  const pipeG = document.createElementNS(SVG, 'g');
+  pipeG.id = 'post-pipe'; pipeG.innerHTML = delivery.pipe();
+  deskG.querySelector(':scope > g').before(pipeG);
   const dlvTween = (ms, to, ease = easeIO) => { const t0 = dlv.travel; return motion(ms, u => { dlv.travel = t0 + (to - t0) * ease(u); drawDlv(); }); };
   // ---- its sounds, made here unless Arnold's recordings are in assets/sounds/fx (tube-rattle, tube-thunk, canister-open)
   async function dlvSound(name) {
@@ -1150,6 +1183,13 @@
       // the lid springing open: a small tock and the hinge's tick
       pan.pan.value = 0;
       noise(t, 22, 1500, 2.5, .12, 4); noise(t + .05, 10, 3200, 3, .05, 3);
+    } else if (name === 'flag') {
+      // the arrival flag flicked up by its spring: a light tick and a short steel twang, from the drawer's side
+      pan.pan.value = -.45;
+      noise(t, 8, 4200, 3, .05, 3);
+      const o = ctx.createOscillator(); o.type = 'triangle'; o.frequency.setValueAtTime(1320, t); o.frequency.exponentialRampToValueAtTime(1180, t + .16);
+      const g = ctx.createGain(); g.gain.setValueAtTime(.0001, t); g.gain.exponentialRampToValueAtTime(.012, t + .004); g.gain.exponentialRampToValueAtTime(.0004, t + .18);
+      o.connect(g).connect(pan); o.start(t); o.stop(t + .2);
     }
   }
   // ---- the flow
@@ -1164,11 +1204,12 @@
   }
   function joinCan(can, item) {
     playtest(`delivery: ${item.why}, ${item.kind}, into the waiting canister`);
-    if (can.kind === 'empty') { can.kind = item.kind; can.why = item.why; }   // (night 2's empty one: now it brings the bag)
-    else (can.more = can.more || []).push(item);
-    dlvSound('tube-rattle'); setTimeout(() => dlvSound('tube-thunk'), 1450);
+    if (can.kind === 'empty') { can.kind = item.kind; can.why = item.why; can.story = item.story; }   // (night 2's empty one: now it brings the bag, and its slip)
+    else (can.more = can.more || []).push(item);       // (with its own slip: the story stays with the canister it was given to)
+    dlvSound('tube-rattle'); setTimeout(() => { dlvSound('tube-thunk'); if (dlv.travel < delivery.OPEN - .001) flagTo(1); }, 1450);
   }
   async function dlvArrive(item) {
+    if (item.story === undefined) item.story = storyOf(item);
     const can = item.kind === 'beans' && !item.aw ? waitingCan() : null;
     if (can && !can.aw) { joinCan(can, item); return; }
     if (dlv.can || dlv.item || dlv.busy) { dlv.queue.push(item); return; }
@@ -1178,6 +1219,7 @@
     await wait(1450);
     dlvSound('tube-thunk');
     dlv.incoming = null; dlv.can = item; drawDlv();
+    if (dlv.travel < delivery.OPEN - .001) flagTo(1);   // the flag: something has come for you (not with the drawer already pulled open)
     // the night's first delivery, Glenn says so, once (Arnold, 2026-10-03: in the playtest it passed unnoticed at the
     // terminal); after that, only the sound
     if (!room.dlvSaid && !item.aw && !room.linkDown) { room.dlvSaid = true; glenn.say('Something for you in the drawer, chief.'); }   // (not aw's, in the blackout: the link is down)
@@ -1190,8 +1232,10 @@
     if (dlv.busy || dlv.item) return;
     hint.classList.add('gone');
     if (dlv.travel < delivery.OPEN - .001) {             // pull it open
-      dlv.busy = true; playtest('delivery drawer open');
-      drawerSound(true, DM.open.ms * DM.open.stopAt); await dlvTween(DM.open.ms, delivery.OPEN);
+      dlv.busy = true; playtest('delivery drawer open' + (dlv.flag > .5 ? ' (the flag was up)' : ''));
+      drawerSound(true, DM.open.ms * DM.open.stopAt);
+      if (dlv.flag > 0) flagTo(0);                       // the flag drops as the drawer is pulled open
+      await dlvTween(DM.open.ms, delivery.OPEN);
       dlv.busy = false; return;
     }
     if (dlv.can) return dlvLift();
@@ -1246,6 +1290,7 @@
   const LID_OPEN = 125 * Math.PI / 180;
   async function dlvLift() {
     dlv.busy = true; dlv.item = dlv.can; dlv.can = null; drawDlv();
+    if (dlv.flag > 0) flagTo(0);
     playtest('canister: lifted');
     await dlvFly(true, 0, 0, 750, 'slip');
     dlv.stage = 'held'; dlv.lid = 0; dlvCatcher.style.display = ''; dlv.busy = false;
@@ -1277,16 +1322,51 @@
   // the slips held up: what came first in front, a second one (beans that joined it) behind it and higher, its printed
   // head showing over the first (VIGIL SYSTEMS, ISSUE SLIP), as two papers held together (offset to the left as well, the
   // ends of its typed lines showed down its side as stray letters)
-  function slipFor(it, place) {
-    const to = account.name || account.user, more = it.more || [];
+  // A slip's story papers come with it (design.md, "The slips carry story"): the memo folded in behind it, the timesheet
+  // clipped to it (a little behind and higher, a clip over both top edges); a reused or carbon slip is the slip itself.
+  // Held up, a click brings the next paper to the front (each must be read: behind, only its head shows), and after the
+  // last, puts them away. page: which paper is in front (fractional while one goes to the back).
+  function papersOf(it) {
+    const to = account.name || account.user, papers = [];
+    const add = (m, no, pair) => {
+      papers.push({ kind: m.kind, opts: { note: m.note, to, aw: m.aw, no, struck: m.story === 'reused', carbon: m.story === 'carbon' }, pair });
+      if (m.story === 'memo') papers.push({ kind: 'memo', opts: {} });
+      if (m.story === 'timesheet') papers.push({ kind: 'timesheet', opts: {}, clipped: true, pair });
+    };
+    add(it, 412, 0); (it.more || []).forEach((m, j) => add(m, 413 + j, j + 1));
+    return papers;
+  }
+  function slipFor(it, place, page = 0) {
+    const papers = papersOf(it), n = papers.length;
+    // where the paper k places behind the front one is: higher and to the right, a clipped one closer (as a clip holds it)
+    const slot = (order, k) => { let dx = 0, dy = 0; for (let i = 1; i <= k; i++) { const p = order[i]; dx += p.clipped ? 12 : 18; dy -= p.clipped ? 40 : 76; } return k ? { cx: place.cx + dx * place.k, cy: place.cy + dy * place.k, k: place.k, rot: -1 } : place; };
+    const orderAt = pg => Array.from({ length: n }, (_, i) => papers[(pg + i) % n]);
+    const p0 = Math.floor(page), f = page - p0, A = orderAt(p0), B = orderAt(p0 + 1);
+    const lerp = (a, b, t) => ({ cx: a.cx + (b.cx - a.cx) * t, cy: a.cy + (b.cy - a.cy) * t, k: a.k + (b.k - a.k) * t, rot: (a.rot ?? -3) + ((b.rot ?? -3) - (a.rot ?? -3)) * t });
+    // going to the back, the front paper drops away below first, then rises behind the rest
+    const placeOf = p => { const ka = A.indexOf(p), kb = B.indexOf(p), pa = slot(A, ka), pb = slot(B, kb); if (!f) return pa; if (ka === 0) { const low = { ...pa, cy: pa.cy + 340 * place.k }; return f < .5 ? lerp(pa, low, f * 2) : lerp(low, pb, f * 2 - 1); } return lerp(pa, pb, f); };
+    const order = f < .5 ? A : B;
     let svg = '';
-    more.slice().reverse().forEach((m, i) => { const j = more.length - i; svg += delivery.slip(m.kind, { to, no: 412 + j }, { cx: place.cx + 18 * j * place.k, cy: place.cy - 76 * j * place.k, k: place.k, rot: -1 }); });
-    return svg + delivery.slip(it.kind, { note: it.note, to, aw: it.aw }, place);
+    for (let i = n - 1; i >= 0; i--) {
+      const p = order[i], pl = placeOf(p);
+      svg += delivery.slip(p.kind, p.opts, pl);
+      const behind = order[i + 1];
+      if (!f && behind && behind.pair === p.pair && behind.pair !== undefined && (behind.clipped || p.clipped)) svg += delivery.clip(pl, 40);
+    }
+    return svg;
+  }
+  async function dlvNextPaper() {
+    dlv.busy = true;
+    const it = dlv.item, cy = look.rest + 470, p0 = dlv.page || 0;
+    playtest('slip: the next paper (' + papersOf(it)[(p0 + 1) % papersOf(it).length].kind + ')');
+    await motion(560, u => { keyLayer.innerHTML = slipFor(it, { cx: 720, cy, k: 1 }, p0 + easeIO(u)); });
+    dlv.page = p0 + 1; keyLayer.innerHTML = slipFor(it, { cx: 720, cy, k: 1 }, dlv.page);
+    dlv.busy = false;
   }
   async function dlvTakeSlip() {
     dlv.busy = true;
     const it = dlv.item;
-    playtest('slip: taken out' + (it.kind === 'note' ? ` (${it.note[0]})` : ''));
+    playtest('slip: taken out' + (it.kind === 'note' ? ` (${it.note[0]})` : '') + (it.story ? `, with the ${it.story}` : '') + (it.more?.length ? `, and ${it.more.map(m => m.kind + (m.story ? ' (' + m.story + ')' : '')).join(', ')}` : ''));
     // the slip comes up out of the mouth as the canister goes back down into the drawer, its lid shutting
     const tip = delivery.rollTip(heldNow(), heldProj(1)), cy = look.rest + 470;
     const a = toFlight(heldNow()), b = toFlight(delivery.drawerPose(delivery.OPEN));
@@ -1306,7 +1386,7 @@
     });
     drawCan.walls = null; canIn = null;
     dlv.can = { spent: true }; drawDlv();
-    canLayer.innerHTML = ''; keyLayer.innerHTML = slipFor(it, { cx: 720, cy, k: 1 });
+    canLayer.innerHTML = ''; dlv.page = 0; keyLayer.innerHTML = slipFor(it, { cx: 720, cy, k: 1 });
     dlv.stage = 'slip'; dlv.busy = false;
   }
   // done with it: the slip goes back down into the canister in the drawer, and the drawer shuts (sent back up)
@@ -1315,7 +1395,7 @@
     const it = dlv.item, cy = look.rest + 470, to = deskDrawer.roomF(delivery.drawerPose(delivery.OPEN).C);
     playtest('slip: put away');
     keyLayer.innerHTML = '';
-    await motion(550, u => { const s = easeIO(u); canDepth = .25 + (DESK_FRONT_DEPTH - .25) * s; canLayer.innerHTML = slipFor(it, { cx: 720 + (to[0] - 720) * s, cy: cy + (to[1] - cy) * s, k: 1 - .92 * s }); });
+    await motion(550, u => { const s = easeIO(u); canDepth = .25 + (DESK_FRONT_DEPTH - .25) * s; canLayer.innerHTML = slipFor(it, { cx: 720 + (to[0] - 720) * s, cy: cy + (to[1] - cy) * s, k: 1 - .92 * s }, dlv.page || 0); });
     canLayer.innerHTML = '';
     await dlvShut();
   }
@@ -1340,14 +1420,266 @@
     if (dlv.busy) return;
     if (dlv.stage === 'held') onCan(e) ? dlvOpen() : dlvPutBack();
     else if (dlv.stage === 'open') dlv.item.kind === 'empty' ? dlvPutBack() : dlvTakeSlip();
-    else if (dlv.stage === 'slip') dlvPutAway();
+    else if (dlv.stage === 'slip') (dlv.page || 0) < papersOf(dlv.item).length - 1 ? dlvNextPaper() : dlvPutAway();
   });
   // a new night: the drawer shut and empty, nothing on its way
-  function dlvReset() { if (dlv.stage === 'slip') keyLayer.innerHTML = ''; room.dlvSaid = false; dlv.incoming = null; dlv.queue = []; dlv.can = null; dlv.item = null; dlv.stage = 'idle'; dlv.travel = 0; dlv.busy = false; canLayer.innerHTML = ''; dlvCatcher.style.display = 'none'; drawDlv(); }
+  function dlvReset() { if (dlv.stage === 'slip') keyLayer.innerHTML = ''; room.dlvSaid = false; dlv.incoming = null; dlv.queue = []; dlv.can = null; dlv.item = null; dlv.stage = 'idle'; dlv.travel = 0; dlv.flag = 0; dlv.busy = false; canLayer.innerHTML = ''; dlvCatcher.style.display = 'none'; drawDlv(); }
   window.__dlv = { arrive: dlvArrive, reset: dlvReset, state: dlv, click: dlvDrawerClick, open: dlvOpen, take: dlvTakeSlip, putAway: dlvPutAway,   // (click, open, take, putAway: for trying it from the console)
     // night 3: the canister in the blackout, with the supervisor link down, for aw (the blackout calls this once it is built)
     aw: () => dlvArrive({ why: 'aw', kind: 'note', aw: true }) };
   drawDlv();
+
+  // ---- M.'s drawer and the ceiling tile (design.md, "M.'s password"; Arnold, 2026-10-03, round 3; drawing in mdrawer.js
+  // and ceiling.js). On night 2 one tile above the desk is out of place. Clicked, it lifts about an inch and there is a
+  // glint in the gap; it settles back, and Glenn: "Be a pal and leave the ceiling to maintenance, chief." (an order: it
+  // logs). Clicked again, it is pushed aside, and a small older key with a paper tag slides off the edge and drops to the
+  // desk with a clink; taking it logs "operator compliance: no". The key opens the right pedestal's middle drawer (an old
+  // keyhole the Pong key plainly doesn't fit), with the first key's motion; using it logs nothing (Glenn never knew of that
+  // drawer: there was no order about it). Inside, M.'s things in a pencil tray and a sealed envelope from IT: held up and
+  // opened, its slip has m's temporary password. Kept between nights and across a logout (the room remembers):
+  // vigil.mdrawer = { key: 'ceiling' | 'desk' | 'lock', opened }.
+  const MD = window.mDrawer, CT = window.ceilingTile;
+  const CEILING_ORDER = 'Be a pal and leave the ceiling to maintenance, chief.';
+  const mdr = { travel: 0, open: false, busy: false, key: 'ceiling', turn: 1, opened: false, held: false, envSlip: 0 };
+  try { Object.assign(mdr, JSON.parse(localStorage.getItem('vigil.mdrawer') || '{}')); } catch (e) {}
+  if (!['ceiling', 'desk', 'lock'].includes(mdr.key)) mdr.key = mdr.key === 'falling' ? 'desk' : 'ceiling';
+  const keepMdr = () => { try { localStorage.setItem('vigil.mdrawer', JSON.stringify({ key: mdr.key, opened: mdr.opened })); } catch (e) {} };
+  // its groups go under the cheat sheet's (the top drawer, pulled out, is in front of this one)
+  const [mdUnder, mdThings, mdOver, mdKeyG, mdHit] = ['under', 'things', 'over', 'key', 'hit'].map(n => { const g = document.createElementNS(SVG, 'g'); g.id = 'mdrawer-' + n; sheetUnder.before(g); return g; });
+  let mdThingsAt = null;                               // (the tray's contents drawn at this travel; they are heavy, so kept)
+  function drawMdr() {
+    const r = MD.drawer(mdr.travel, { key: mdr.key === 'lock' ? 'lock' : 'none', turn: mdr.turn, env: { lifted: mdr.held, opened: mdr.opened } });
+    mdUnder.innerHTML = r.under;
+    const at = `${mdr.travel}|${mdr.held}|${mdr.opened}`;
+    if (at !== mdThingsAt) { mdThings.innerHTML = r.things; mdThingsAt = at; }
+    mdOver.innerHTML = r.over; mdKeyG.innerHTML = r.key;
+    mdHit.innerHTML = `<polygon data-hit="front" points="${r.hit}" fill="transparent"/>` + (r.envHit && mdr.open && !mdr.held ? `<polygon data-hit="envelope" points="${r.envHit}" fill="transparent"/>` : '');
+  }
+  const mdTween = (ms, step) => new Promise(done => { const t0 = performance.now(); (function frame(now) { const u = Math.min(1, (now - t0) / ms); step(u); drawMdr(); if (u < 1) requestAnimationFrame(frame); else done(); })(t0); });
+  // the small sounds here, made in code as the drawer's others are: the tile lifting (a dry scrape of mineral board on its
+  // grid) and settling (a soft knock); the key's slide off the tile, its clink on the desk; a quiet metallic slide in the
+  // ceiling (the safety net); the envelope opened (a paper flick) and its slip drawn out (a soft slide)
+  function mdSound(kind) {
+    if (muted) return;
+    const ctx = ac(), t = ctx.currentTime, pan = ctx.createStereoPanner(); pan.connect(ctx.destination);
+    const noise = (at, ms, f, q, v, shape = 3, type = 'bandpass') => { const len = Math.floor(ctx.sampleRate * ms / 1000), buf = ctx.createBuffer(1, len, ctx.sampleRate), d = buf.getChannelData(0); for (let i = 0; i < len; i++) { const u = i / len; d[i] = (Math.random() * 2 - 1) * Math.pow(1 - u, shape) * Math.min(1, u * 40); } const s = ctx.createBufferSource(); s.buffer = buf; const bp = ctx.createBiquadFilter(); bp.type = type; bp.frequency.value = f; bp.Q.value = q; const g = ctx.createGain(); g.gain.value = v; s.connect(bp).connect(g).connect(pan); s.start(at); };
+    const ring = (at, f, v, ms) => { const o = ctx.createOscillator(); o.type = 'sine'; o.frequency.value = f; const g = ctx.createGain(); g.gain.setValueAtTime(v, at); g.gain.exponentialRampToValueAtTime(.0005, at + ms / 1000); o.connect(g).connect(pan); o.start(at); o.stop(at + ms / 1000 + .01); };
+    if (kind === 'tile-lift') { pan.pan.value = .15; noise(t, 260, 900, .9, .05, 1.2); noise(t + .02, 30, 2400, 2, .03); }
+    if (kind === 'tile-settle') { pan.pan.value = .15; noise(t, 50, 500, 1.2, .07, 4); }
+    if (kind === 'key-slide') { pan.pan.value = .15; noise(t, 220, 3200, 2.5, .025, 1); }
+    if (kind === 'clink') { pan.pan.value = -.2; noise(t, 20, 3800, 3, .12); ring(t, 3300, .014, 160); ring(t, 4700, .008, 90); noise(t + .09, 14, 4200, 3, .05); ring(t + .09, 3300, .005, 80); }
+    if (kind === 'ceiling-slide') { pan.pan.value = .2; noise(t, 520, 2600, 3, .012, .8, 'bandpass'); noise(t + .48, 30, 1800, 2, .01); }
+    if (kind === 'paper-flick') { pan.pan.value = 0; noise(t, 30, 2200, 1.4, .09, 4); }
+    if (kind === 'paper-slide') { pan.pan.value = 0; noise(t, 420, 1400, .8, .03, .9); }
+  }
+
+  // ---- the tile. Its shapes come from the drawing's ceiling curves, measured once, when there is a tile to draw.
+  const tileG = document.createElementNS(SVG, 'g');
+  tileG.id = 'ceiling-tile'; tileG.classList.add('slot');
+  $('ceiling').after(tileG);
+  let ceilingCell = null;
+  const cellOf = () => ceilingCell || (ceilingCell = CT.build([...$('ceiling').querySelectorAll('path')].map(p => {
+    const len = p.getTotalLength(); return { len, at: l => { const q = p.getPointAtLength(Math.max(0, Math.min(len, l))); return [q.x - 240, q.y]; } };   // (#ceiling sits at translate(-240 0))
+  })));
+  const tile = { state: null, lift: 0, tilt: 0, busy: false, key: null, slid: false };
+  function drawTile() {
+    if (!tile.state) { tileG.innerHTML = ''; return; }
+    const c = cellOf(), glint = tile.state === 'glint' ? (tile.lift > 10 ? CT.GLINT.peek : CT.GLINT.out) : tile.state === 'peek' ? CT.GLINT.peek : null;
+    tileG.innerHTML = c.svg(tile.lift, tile.tilt, { glint, inner: tile.key || '' }) + (tile.state !== 'aside' ? `<polygon points="${c.hit}" fill="transparent"/>` : '');
+  }
+  const tileTo = (ms, [l1, t1], ease = easeIO) => { const l0 = tile.lift, t0 = tile.tilt; return motion(ms, u => { const s = ease(u); tile.lift = l0 + (l1 - l0) * s; tile.tilt = t0 + (t1 - t0) * s; drawTile(); }); };
+  // a new night: out of place on night 2 until the key is taken (on every replay of it); in place on nights 1 and 3 (night
+  // 3's tile is the finale's: behind it, nothing, built with the breaker)
+  function tileNight() {
+    tile.state = shift.level === 2 && mdr.key === 'ceiling' ? 'out' : null; tile.slid = false; tile.key = null;
+    [tile.lift, tile.tilt] = tile.state ? CT.STATES.out : [0, 0];
+    drawTile();
+  }
+  const handsFull = () => held || sheet.held || mdr.held || dlv.stage !== 'idle' || dlv.busy || file.busy || mdr.busy;
+  async function tileClick() {
+    if (tile.busy || !tile.state || tile.state === 'aside' || handsFull()) return;
+    tile.busy = true; hint.classList.add('gone');
+    if (tile.state === 'out') {
+      // the first click: lifted about an inch, a glint in the gap; it settles back, and Glenn
+      playtest('ceiling tile: lifted (a glint)');
+      tile.state = 'peek'; mdSound('tile-lift');
+      await tileTo(380, CT.STATES.peek, s => 1 - Math.pow(1 - s, 3));
+      await wait(750);
+      tile.state = 'glint';
+      await tileTo(420, CT.STATES.out, s => s * s);
+      mdSound('tile-settle');
+      tile.busy = false;
+      if (glenn.once('ceiling', CEILING_ORDER)) glenn.order('ceiling', CEILING_ORDER);
+      else if (glenn.taught('ceiling')) glenn.order('ceiling', CEILING_ORDER);   // (said on an earlier night: it still stands)
+      return;
+    }
+    // the second click: lifted and pushed aside; the key slides off the edge and drops to the desk
+    playtest('ceiling tile: pushed aside (the key)');
+    tile.state = 'aside'; mdSound('tile-lift');
+    await tileTo(520, CT.STATES.aside, s => 1 - Math.pow(1 - s, 3));
+    await keyFalls();
+    tile.busy = false;
+  }
+  tileG.addEventListener('pointerdown', e => { e.preventDefault(); tileClick(); });
+
+  // ---- the second key, from the ceiling to the desk, and from the desk to the lock. One true size (2.0, as the first).
+  const deskKey2G = document.createElementNS(SVG, 'g');
+  deskKey2G.classList.add('slot');
+  deskKeyG.after(deskKey2G);
+  function drawDeskKey2() {
+    if (mdr.key !== 'desk') { deskKey2G.innerHTML = ''; return; }
+    const p = MD.deskPose(), [x, y] = deskDrawer.roomF(p.c);
+    deskKey2G.innerHTML = MD.oldKey(p, deskDrawer.roomF) + `<ellipse cx="${(x - 14).toFixed(1)}" cy="${y.toFixed(1)}" rx="46" ry="16" fill="transparent"/>`;
+  }
+  async function keyFalls() {
+    // where it starts: at the gap's lower edge, far up (it is about 35 px there), drawn by the near camera (no bend) so
+    // it is exactly at the gap; it lands on the desk drawn by the room's (bent), as it lies there
+    const g = cellOf().coons(CT.KEY_AT), Z0 = 2900, c0 = [(g[0] - 720) * Z0 / 1500, (g[1] - 813) * Z0 / 1500, Z0];
+    const A0 = v3.norm([1, 0, .25]), B0 = v3.norm(v3.cross([0, -1, 0], A0));
+    const start = { c: c0, A: A0, B: B0 }, edge = { c: v3.add(c0, [40, 25, -30]), A: v3.norm([1, .5, .25]), B: B0 }, end = MD.deskPose();
+    keyDepth = 1.0;                                    // with the ceiling, then down to the desk's
+    mdSound('key-slide');
+    await motion(320, u => { const s = easeIO(u); keyLayer.innerHTML = MD.oldKey(between(start, edge, s), flatOrRoom(0)); });
+    lookAt(downRest());
+    // it falls: slow off the edge, faster and faster, turning over once on the way
+    await motion(760, u => {
+      const s = u * u, pose = between(edge, end, s, v3.add(edge.c, [0, 250, -200]), v3.add(end.c, [0, -420, 60]));
+      keyDepth = 1.0 + (DESK_FRONT_DEPTH - 1.0) * s;
+      keyLayer.innerHTML = MD.oldKey(pose, flatOrRoom(s));
+    });
+    keyLayer.innerHTML = '';
+    mdr.key = 'desk'; keepMdr(); drawDeskKey2(); mdSound('clink');
+    // taking it is not leaving the ceiling to maintenance
+    glenn.order('ceiling', CEILING_ORDER); glenn.broke('ceiling');
+  }
+  // To the lock, as the first key goes to its own: it rises off the desk and comes over in an arc, slows as it lines up
+  // with the keyhole, slides in and comes to rest; a beat; the turn, stiff, giving back, then through with the click; and
+  // the drawer comes out a little. It stays in the lock.
+  async function key2ToLock() {
+    if (mdr.key !== 'desk' || mdr.busy || handsFull()) return;
+    mdr.busy = true; deskKey2G.innerHTML = '';
+    playtest('the second key: to the lock');
+    keyDepth = DESK_FRONT_DEPTH;
+    lookAt(FAR);
+    const at = d => MD.lockPose(d), drawAt = d => { keyLayer.innerHTML = MD.oldKey(at(d), deskDrawer.roomF, { maxA: MD.lockMaxA(d), tag: false }); };
+    const from = MD.deskPose(), out = at(34);
+    await motion(1700, u => { keyLayer.innerHTML = MD.oldKey(between(from, out, easeIO(u), v3.add(from.c, [0, -190, -50]), v3.add(out.c, [0, -80, -90])), deskDrawer.roomF, { tag: u < .5 }); });
+    await motion(600, u => drawAt(34 - 24 * (1 - Math.pow(1 - u, 2))));
+    keySound('in');
+    await motion(700, u => drawAt(10 * Math.pow(1 - u, 3)));
+    drawAt(0);
+    await wait(450);
+    keyLayer.innerHTML = '';
+    mdr.key = 'lock'; mdr.turn = 0; keepMdr();
+    const smooth01 = x => x * x * (3 - 2 * x);
+    const TURN = [[0, 0], [.42, .13], [.52, .105], [.66, .17], [.86, .97], [1, 1]];
+    let clicked = false;
+    await mdTween(1100, u => {
+      let k = 1; while (k < TURN.length - 1 && u > TURN[k][0]) k++;
+      const [t0, a0] = TURN[k - 1], [t1, a1] = TURN[k];
+      mdr.turn = a0 + (a1 - a0) * smooth01(Math.min(1, Math.max(0, (u - t0) / (t1 - t0))));
+      if (!clicked && u >= .84) { clicked = true; keySound('turn'); }
+    });
+    mdr.turn = 1;
+    await wait(160);
+    drawerSound(true, 140);
+    await mdTween(260, u => { mdr.travel = .015 * (3 * u * u - u * u * u) / 2; });
+    mdr.busy = false;
+  }
+  deskKey2G.addEventListener('pointerdown', e => { e.preventDefault(); key2ToLock(); });
+
+  // ---- the drawer: locked, it rattles in place as the file drawer does (the same sound) and Glenn says nothing about it
+  async function rattleMdr() {
+    mdr.busy = true;
+    playtest("m's drawer: locked");
+    playFx('drawer-locked', .6, .45);
+    for (const dx of [2, -2, 1.5, -1, .5, 0]) { for (const g of [mdUnder, mdThings, mdOver, mdKeyG]) g.style.transform = dx ? `translate(${dx}px, 0)` : ''; await wait(30); }
+    mdr.busy = false;
+  }
+  async function openMdr() {
+    if (mdr.open || mdr.busy) return;
+    mdr.open = true; mdr.busy = true;
+    playtest("m's drawer open");
+    drawerSound(true, DM.open.ms * DM.open.stopAt);
+    const t0 = mdr.travel;
+    await mdTween(DM.open.ms, u => { mdr.travel = t0 + (MD.OPEN - t0) * DM.open.travel(u); });
+    mdr.busy = false;
+  }
+  async function closeMdr() {
+    if (!mdr.open || mdr.busy || mdr.held) return;
+    mdr.open = false; mdr.busy = true;
+    playtest("m's drawer closed");
+    drawerSound(false, DM.close.ms);
+    await mdTween(DM.close.ms, u => { mdr.travel = MD.OPEN * DM.close.travel(u); });
+    mdr.busy = false;
+  }
+  // ---- the envelope: lifted out of the tray and held up (as the cheat sheet's card is: under the drawer's near walls
+  // until it is clear of them); a click opens it and the slip comes up out of it; a click puts it back, opened
+  const mdCatcher = document.createElement('div');
+  Object.assign(mdCatcher.style, { position: 'fixed', inset: '0', zIndex: '50', display: 'none', cursor: 'pointer' });
+  document.body.appendChild(mdCatcher);
+  const envAt = (pose, pr, width = 1) => MD.envelope(pose, pr, { opened: mdr.opened, slipOut: mdr.envSlip, width });
+  async function liftEnvelope() {
+    if (mdr.busy || mdr.held || !mdr.open) return;
+    mdr.busy = true; mdr.held = true;
+    playtest('envelope: lifted' + (mdr.opened ? ' (opened)' : ''));
+    const from = MD.envelopeLying(mdr.travel), to = MD.heldEnvelope(look.rest);
+    const walls = polysOf(MD.drawer(mdr.travel).over);
+    drawMdr();
+    let clearAt = null;
+    await motion(700, u => {
+      const s = easeIO(u), e = envAt(between(from, to, s, v3.add(from.c, [0, -60, -20]), v3.add(to.c, [0, 30, 40])), roomOrFlat(s), 1 + .5 * s);
+      if (clearAt === null && overlaps(ptsOf(e.svg, 9), walls)) { mdThings.querySelector('[data-env]')?.remove(); mdThings.insertAdjacentHTML('beforeend', `<g data-env="1">${e.svg}</g>`); keyLayer.innerHTML = ''; return; }
+      if (clearAt === null) { clearAt = s; mdThings.querySelector('[data-env]')?.remove(); }
+      keyDepth = DESK_FRONT_DEPTH + (.25 - DESK_FRONT_DEPTH) * (s - clearAt) / (1 - clearAt || 1);
+      keyLayer.innerHTML = e.svg;
+    });
+    mdThings.querySelector('[data-env]')?.remove();
+    // an envelope opened before: the slip comes up again
+    if (mdr.opened) await slipUp();
+    mdCatcher.style.display = '';
+    mdr.busy = false;
+  }
+  async function slipUp() {
+    mdSound('paper-slide');
+    await motion(520, u => { mdr.envSlip = easeIO(u); keyLayer.innerHTML = envAt(MD.heldEnvelope(look.rest), deskDrawer.proj, 1.5).svg; });
+  }
+  async function openEnvelope() {
+    mdr.busy = true;
+    playtest('envelope: opened');
+    mdSound('paper-flick');
+    mdr.opened = true; keepMdr();
+    keyLayer.innerHTML = envAt(MD.heldEnvelope(look.rest), deskDrawer.proj, 1.5).svg;
+    await wait(160);
+    await slipUp();
+    mdr.busy = false;
+  }
+  async function putEnvelopeBack() {
+    mdr.busy = true; mdCatcher.style.display = 'none';
+    playtest('envelope: put back');
+    if (mdr.envSlip > 0) { mdSound('paper-slide'); await motion(300, u => { mdr.envSlip = 1 - easeIO(u); keyLayer.innerHTML = envAt(MD.heldEnvelope(look.rest), deskDrawer.proj, 1.5).svg; }); }
+    mdr.envSlip = 0;
+    const from = MD.heldEnvelope(look.rest), to = MD.envelopeLying(mdr.travel);
+    const walls = polysOf(MD.drawer(mdr.travel).over), pose = s => between(from, to, s, v3.add(from.c, [0, 30, 40]), v3.add(to.c, [0, -60, -20]));
+    let meetAt = 1; for (let k = 0; k <= 60; k++) { const s = k / 60; if (overlaps(ptsOf(envAt(pose(s), roomOrFlat(1 - s)).svg, 9), walls)) { meetAt = s; break; } }
+    await motion(650, u => {
+      const s = easeIO(u), e = envAt(pose(s), roomOrFlat(1 - s), 1.5 - .5 * s);
+      keyDepth = .25 + (DESK_FRONT_DEPTH - .25) * Math.min(1, s / (meetAt || 1));
+      if (s >= meetAt) { keyLayer.innerHTML = ''; mdThings.querySelector('[data-env]')?.remove(); mdThings.insertAdjacentHTML('beforeend', `<g data-env="1">${e.svg}</g>`); } else keyLayer.innerHTML = e.svg;
+    });
+    keyLayer.innerHTML = '';
+    mdr.held = false; mdThingsAt = null; drawMdr();
+    mdr.busy = false;
+  }
+  mdCatcher.addEventListener('pointerdown', e => { e.preventDefault(); if (mdr.busy) return; mdr.opened ? putEnvelopeBack() : openEnvelope(); });
+  mdHit.addEventListener('pointerdown', e => {
+    const hit = e.target.dataset?.hit; if (!hit) return;
+    e.preventDefault(); hint.classList.add('gone');
+    if (mdr.busy) return;
+    if (mdr.key !== 'lock') { rattleMdr(); return; }
+    if (hit === 'envelope') liftEnvelope(); else mdr.open ? closeMdr() : openMdr();
+  });
+  setTimeout(() => { drawMdr(); drawDeskKey2(); });
 
 
   // ------------------------------------------------------------ parallax
@@ -2236,6 +2568,11 @@
       { t: 30, from: 'IT Operations', addr: 'it@site4.vigil', subject: 'Maintenance tonight, 03:00', body: () => [
         'Scheduled power maintenance tonight between 03:00 and 03:05. You may notice a brief interruption. No action is needed.',
         '', 'Please do not touch the breaker panel.', '', { text: 'IT Operations, Site 4', cls: 'dim' }] },
+      // how the post works (Arnold's words, 2026-10-03, round 3); the last line is for later (nothing lets you send anything up)
+      { t: 30, from: 'Facilities', addr: 'facilities@site4.vigil', subject: 'Internal post', body: () => [
+        "Site 4 is served by internal post from Stores, Level 2. Supplies arrive at your desk's post drawer, on your left.",
+        '', 'When the flag is up, something has come for you. Take what is inside and close the drawer; the carrier goes back up by itself.',
+        '', 'Please do not put anything else in the carrier.', '', { text: 'Facilities, Site 4', cls: 'dim' }] },
       { t: 120, from: 'Facilities', addr: 'facilities@site4.vigil', subject: 'Lift out of service', body: () => [
         'The lift on level 2 is out of service until further notice. Please use the stairs.',
         '', 'We apologise for any inconvenience.', '', { text: 'Facilities, Site 4', cls: 'dim' }] },
@@ -2400,6 +2737,7 @@
     // a new night starts with only what the night hands over: Pong in the drawer, the rest found again
     tray.carts = shift.startsWith.filter(l => l !== room.cart).map(label => ({ slot: CARTS[label].slot, label, lift: 0 })); drawDrawer();
     window.__dlv?.reset();
+    tileNight();                                       // the ceiling tile: out of place on night 2 until its key is taken
     if (room.cart && room.cart !== 'PONG') shift.find(room.cart);   // one still in the slot stays yours
     eyeStrain();
     if (room.coffee < 1) setCoffee(1);                 // a new night starts with a full mug
@@ -2434,7 +2772,7 @@
         : `${e.unit}. That's three, chief. I'm sorry. Be a pal and go on home.`);
       beep(294, .14, .035); setTimeout(() => beep(220, .2, .035), 170);   // lower and slower than an alert
     } else if (e.type === 'delivery') {
-      window.__dlv?.arrive({ why: e.why, kind: e.kind });
+      window.__dlv?.arrive({ why: e.why, kind: e.kind, n: e.n });
     } else if (e.type === 'relieved' || e.type === 'dawn') {
       endOfNight(e.report);
     } else if (e.type === 'found') {
@@ -2455,6 +2793,8 @@
     if (room.melting || asleep || account.loggingIn) return;   // the room is busy dying, you are out, or not in yet
     for (const e of shift.tick(dt)) showEvent(e);
     inbox.tick(shift.t);
+    // the ceiling's safety net (night 2): late, once, if the key is still up there, something shifts on the tile. No text.
+    if (shift.level === 2 && (tile.state === 'out' || tile.state === 'glint') && !tile.slid && shift.t >= 310 && !shift.over) { tile.slid = true; playtest('ceiling: the slide (the key still up there)'); mdSound('ceiling-slide'); }
     // the second login, about 01:30, when nobody is talking
     if (!room.tty2Done && shift.t >= 150 && shift.t < 300 && !room.talking && !borrowedVoice) { room.tty2Done = true; tty2Session(); }
     // 04:44 (344 shift minutes in), at the shell, looking at the screen; if you are busy, as soon as you're not
@@ -2566,8 +2906,9 @@
     beans: (n = 1) => giveBeans(n, 'dev'),           // beans in, with the chirp
     // the login note posed by hand (its peel in radians, its drop in camera units), for checking its motion; note() puts it back
     note: (peel, drop) => { noteG.style.display = ''; return placeNote(peel || 0, drop || 0); },
-    // a delivery now: kind beans | note | empty | aw; the streak so far
-    delivery: (kind = 'beans') => kind === 'aw' ? window.__dlv.aw() : window.__dlv.arrive({ why: 'dev', kind }),
+    // a delivery now: kind beans | note | empty | aw; why streak | bag (and n, the night's first or second streak) gives
+    // it the slip that canister carries on this night (design.md, "The slips carry story"); the streak so far
+    delivery: (kind = 'beans', why = 'dev', n) => kind === 'aw' ? window.__dlv.aw() : window.__dlv.arrive({ why, kind, n }),
     get streak() { return shift.streak; },
     chirp: () => beanChirp(),
     file: { unlock: () => { file.unlocked = true; file.key = 'lock'; keepFile(); drawFile(); }, keyToDesk: () => { file.key = 'desk'; keepFile(); drawDeskKey(); }, keyFromPong: () => keyFromPong(), fileIt: () => { file.filed = true; file.filedShift = shiftNo; keepFile(); drawFile(); }, nextShift: () => { shiftNo++; drawFile(); },
@@ -2610,6 +2951,7 @@
     term.announce(lines.map(t => ({ text: t, cls: 'dim' })));
     await wait(1500);
     glenn.complied('file');                           // the file drawer left alone all night
+    glenn.complied('ceiling');                        // and the ceiling (night 2: the key not taken)
     await glenn.say("That's the night, chief! Day shift's on their way. Nice work.");
     // nobody comes (shift minutes: 390 is 05:30)
     for (const [t, text] of [[394, 'handover: waiting for the day shift.'], [397, 'handover: waiting.'], [400, 'handover: day shift not on site.']]) {
@@ -2773,7 +3115,10 @@
     let gameKey = null;          // key handler while a game runs
     let hist = [], histIdx = -1, histDraft = '';
     let cwd = '~', lastTyped = 0, locked = false;
-    const prompt = () => `${account.user}@vigil:${cwd}$ `;
+    // su m (design.md, "M.'s password"): while it is set, the shell is m's: m's prompt (the one burned into the tube), m's
+    // mail, m's history (and the arrow keys walk it); logout returns to you. Not kept: a reload is you again.
+    let su = null, suTry = null;
+    const prompt = () => `${su ? su.user : account.user}@vigil:${cwd}$ `;
     const LOGIN = 'site4 login: ';
     const esc = s => s.replace(/[&<>]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c]));
     const span = l => typeof l === 'string' ? esc(l) : l.html !== undefined ? l.html : `<span class="${l.cls || ''}">${esc(l.text)}</span>`;
@@ -2823,6 +3168,7 @@
         for (const l of lines.slice(-MAX)) all.push(...wrap(runsOf(l)));
         if (mode === 'shell') all.push(...wrap([{ text: prompt() + line }]));
         else if (mode === 'login') all.push(...wrap([{ text: LOGIN + line }]));
+        else if (mode === 'password') all.push(...wrap([{ text: 'Password: ' }]));   // (typed without echo)
         if (mode !== 'off') {
           if (!all.length) all.push([]);
           let col = lenOf(all[all.length - 1]);
@@ -3135,7 +3481,7 @@
         return [];
       },
       top: () => { runTop(); return []; },
-      history: () => hist.map((h, i) => `${String(i + 1).padStart(4)}  ${h}`),
+      history: () => hist.map((h, i) => `${String(i + 1).padStart(4)}  ${h}`),   // (as m, m's: hist is m's while su is on)
       clear: () => { lines = []; return []; },
       echo: (args) => [args.join(' ')],
       who: () => {
@@ -3153,7 +3499,8 @@
         '[    3.402117] vigild: watchdog armed, 1 operator',
         ...(room.replayedAt ? [`[${(20640 + Math.round(shift.t * 60)).toString().padStart(5)}.000000] tty1: input replayed from tty2 (${room.replayedAt})`] : []),
       ],
-      whoami: () => [account.user, { text: "(to go by another name: name <new name>)", cls: 'dim' }],
+      whoami: () => su ? [su.user] : [account.user, { text: "(to go by another name: name <new name>)", cls: 'dim' }],
+      su: (args) => runSu(args.filter(a => a !== '-' && a !== '-l')[0] || 'root'),
       name: (args) => {
         const n = args.join(' ').trim().replace(/\s+/g, ' ').replace(/[^\p{L}\p{N} .'-]/gu, '').slice(0, 24);
         if (!n) return [account.name, { text: 'usage: name <new name>', cls: 'dim' }];
@@ -3161,8 +3508,8 @@
         try { localStorage.setItem('vigil.operator', n); } catch (e) {}
         return [`you are ${n} now.`];
       },
-      mail: (args) => inbox.command(args) || (runMailPicker(), []),
-      logout: () => { setTimeout(() => logout(), 300); return ['logout']; },
+      mail: (args) => su ? (runMailPicker(M_BOX), []) : inbox.command(args) || (runMailPicker(), []),
+      logout: () => { if (su) { suEnd(); return []; } setTimeout(() => logout(), 300); return ['logout']; },
       date: () => [`${new Date().toDateString()} ${shift.clock()}`],
       uptime: () => [`${shift.clock()} up ${hm(shift.t)}, 1 user, load average: ${(.4 + shift.open().length * .6).toFixed(2)}, ${(.3 + shift.open().length * .4).toFixed(2)}, 0.21`],
       power: (args) => {
@@ -3214,7 +3561,7 @@
       eject: () => { if (!room.cart) return ['eject: nothing in the slot.']; ejectCart(); return []; },
       sudo: (args) => args.join(' ') === 'make me a sandwich' ? ['okay.'] : ['operator is not in the sudoers file. this incident will be reported.'],
       make: (args) => args.join(' ') === 'me a sandwich' ? ['what? make it yourself.'] : ['make: *** no targets. stop.'],
-      exit: () => ['there is no exit. only more racks.'],
+      exit: () => su ? (suEnd(), []) : ['there is no exit. only more racks.'],
       rm: (args) => {
         if (/^-[rf]{2}$/.test(args[0]) && args[1] === '/') { meltdown(); return []; }
         return args.length ? [`rm: cannot remove '${args.join(' ')}': permission denied (and rude)`] : ['rm: missing operand'];
@@ -3681,7 +4028,8 @@
     // ---- the mail picker (Arnold: like the switch picker, not numbers): up/down chooses, enter opens it on the
     // tube, enter, q or backspace goes back to the inbox, q or backspace there closes it (esc is the menu's, everywhere).
     // Unread messages bright, read ones dim.
-    function runMailPicker() {
+    function runMailPicker(src = inbox) {
+      const inbox = src;                                 // (m's, as m)
       mode = 'game'; gameName = 'mail';
       shift.hold('mail', true);                          // reading the mail costs no energy (Eugene's playtest, 2026-10-02)
       const box = inbox.items();
@@ -4015,6 +4363,59 @@
       await boot(['restored from snapshot ' + stamp() + '.', 'that one is on you, operator.']);
     }
 
+    // ---- su: m's account (design.md, "M.'s password"). su <user> asks for the password, typed without echo; wrong (or
+    // any account but m's: only m's password is anywhere to be found), "su: Authentication failure" after a moment, as su
+    // does; right, the shell is m's until logout. The password is on the slip in IT's envelope in M.'s drawer.
+    const OLD_USERS = ['ts', 'jk', 'rd', 'aw', 'm', 'root', 'glenn'];
+    function runSu(user) {
+      user = user.toLowerCase();
+      if (su && su.user === user) return [];
+      if (!OLD_USERS.includes(user) && user !== account.user) return [`su: user ${user} does not exist`];
+      suTry = user; line = ''; mode = 'password'; render();
+      playtest('su ' + user);
+      return [];
+    }
+    async function suCheck(p) {
+      const user = suTry; suTry = null; mode = 'proc'; stopProc = null; render();
+      const ok = user === 'm' && p === window.mDrawer.PASSWORD;
+      await wait(ok ? 350 : 1600);                      // (su takes its time over a wrong one)
+      if (!ok) { playtest(`su ${user}: authentication failure`); print('su: Authentication failure'); setMode('shell'); return; }
+      playtest('su m: in');
+      logLine('su[2207]: session opened for user m by ' + account.user);
+      su = { user: 'm', saved: { hist, cwd } }; hist = M_HISTORY.slice(); histIdx = -1; cwd = '~';
+      setMode('shell');
+    }
+    function suEnd(quiet = false) {
+      if (!su) return;
+      if (!quiet) { print('logout'); logLine('su[2207]: session closed for user m'); playtest('su m: logout'); }
+      hist = su.saved.hist; cwd = su.saved.cwd; histIdx = -1; su = null;
+      if (!quiet) render();
+    }
+    // m's history: the job, then less of it; what M. found (the grep the player finds on night 3); Glenn; the override's
+    // code years ago (the finale's: power --authorize); not yet, as a command; the last line logout. Never commented on.
+    const M_HISTORY = ['status', 'reboot L20', 'status', 'reroute R17', 'top', 'status', 'defrag L41', 'reboot L33', 'status', 'route rack-left',
+      'reroute L14', 'status', 'reboot L47', 'top', 'status', 'grep -i "be a pal" logs/vigild.log', 'status', 'finger glenn',
+      'power --authorize 7219', 'status', 'not yet', 'logout'];
+    // m's mail: Glenn's lines, word for word, years before yours; IT's account notice (the envelope's, which M. never
+    // opened: unread); Vigil Weekly's operator of the month; the day shift running late. Nothing from M. to anyone.
+    const M_MAIL = [
+      { from: 'Glenn', addr: 'glenn@site4.vigil', subject: '(no subject)', at: 'Jun  7', date: 'Thu, 7 Jun 2018 23:14', read: true, body: () => ['Be a pal and read the runbook: type cat runbook.'] },
+      { from: 'Glenn', addr: 'glenn@site4.vigil', subject: '(no subject)', at: 'Aug 13', date: 'Mon, 13 Aug 2018 01:52', read: true, body: () => ['Be a pal and keep it by the book.'] },
+      { from: 'Glenn', addr: 'glenn@site4.vigil', subject: '(no subject)', at: 'Oct 12', date: 'Fri, 12 Oct 2018 03:40', read: true, body: () => ['Be a pal and leave it be.'] },
+      { from: 'Glenn', addr: 'glenn@site4.vigil', subject: '(no subject)', at: 'Mar  9', date: 'Sat, 9 Mar 2019 02:26', read: true, body: () => ['Be a pal and leave the ceiling to maintenance.'] },
+      { from: 'Vigil Weekly', addr: 'news@vigil', subject: 'Operator of the month', at: 'Mar 15', date: 'Fri, 15 Mar 2019 02:30', read: true, body: () => [
+        "This month's operator of the month is M., Site 4, nights.", '', '11,408 consecutive shifts, and not one missed. Congratulations, M.!', '', { text: 'Vigil Weekly. Someone is always awake.', cls: 'dim' }] },
+      { from: 'day shift', addr: 'dayshift@site4.vigil', subject: 'running late', at: 'Apr  2', date: 'Tue, 2 Apr 2019 05:15', read: true, body: () => [
+        'running a bit late. hold the fort.', '', { text: '- day shift', cls: 'dim' }] },
+      { from: 'IT Operations', addr: 'it@site4.vigil', subject: 'Account notice', at: 'Apr  2', date: 'Tue, 2 Apr 2019 06:02', read: false, body: () => [
+        'ACCOUNT NOTICE · SITE 4 · CONFIDENTIAL', '', 'ACCOUNT: m', `TEMPORARY PASSWORD: ${window.mDrawer.PASSWORD}`, 'LOG IN WITH: su m', '',
+        'Change it at first login. Do not write it down.', '', { text: 'IT Operations, Site 4', cls: 'dim' }] },
+    ];
+    const M_BOX = {
+      items: () => M_MAIL, unread: () => M_MAIL.filter(m => !m.read).length,
+      open: i => { const m = M_MAIL[i]; m.read = true; return [{ text: `From: ${m.from} <${m.addr}>`, cls: 'dim' }, { text: `Subject: ${m.subject}`, cls: 'dim' }, { text: `Date: ${m.date}`, cls: 'dim' }, '', ...m.body()]; },
+    };
+
     // ---- tab completion
     function complete() {
       const parts = line.split(/\s+/);
@@ -4087,6 +4488,7 @@
 
     // afterLogin: what the room shows between the login and the welcome (night 3's first alert)
     async function boot(extra = [], afterLogin = null) {
+      if (su) suEnd(true);                              // (a boot is you again)
       mode = 'boot'; frame = null;
       const seq = [
         ['VIGIL BIOS  v2.4            (c) Vigil Systems', 'dim', 200],
@@ -4112,7 +4514,7 @@
     let pending = [];
     function drain() {
       setTimeout(() => {
-        if (!pending.length || locked || !(mode === 'shell' || mode === 'login')) return;
+        if (!pending.length || locked || !(mode === 'shell' || mode === 'login' || mode === 'password')) return;
         const keys = pending; pending = [];
         for (const k of keys) term.input(k);
       }, 0);
@@ -4135,6 +4537,13 @@
           else if (key === 'ClearLine') line = '';
           else if (key.length === 1 && /[\p{L}\p{N} .'-]/u.test(key) && line.length < 24) line += key;
           render(); return;
+        }
+        if (mode === 'password') {
+          if (key === 'Enter') { const p = line; line = ''; print('Password: '); suCheck(p); return; }
+          if (key === 'Backspace') line = line.slice(0, -1);
+          else if (key === 'ClearLine' || key === 'DeleteWord') line = '';
+          else if (key.length === 1 && line.length < 64) line += key;
+          return;                                        // (nothing shows: no echo)
         }
         if (mode === 'game') { gameKey?.(key); return; }
         // a live view (top, tail -f, matrix): q or backspace closes it; nothing else does

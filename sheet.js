@@ -36,8 +36,9 @@
   ];
   const COL = { k: -61, t: -36 }, SIZE = 8;
 
-  function drawer(out) {
-    const F = window.deskDrawer.F, { x0, x1, y0, y1, wall, wd } = BOX;
+  // (box: another drawer of the same make, the right pedestal's middle one, M.'s: mdrawer.js)
+  function drawer(out, box = BOX) {
+    const F = window.deskDrawer.F, { x0, x1, y0, y1, wall, wd } = box;
     const poly = (ps, fill, extra = '') => `<polygon points="${fmt(ps.map(F))}" fill="${fill}" ${extra}/>`;
     // straight runs sampled on one grid, at every whole x (and their ends), so the desk's bend curves them and two edges
     // along the same line land on the same points (sampled each on its own, they stood 0.15 px apart: a doubled line)
@@ -65,8 +66,8 @@
     return { under: s, over };
   }
   // where a click takes the drawer: its front, and the opening above it once it is out
-  function drawerHit(out) {
-    const F = window.deskDrawer.F, { x0, x1, y0, y1 } = BOX;
+  function drawerHit(out, box = BOX) {
+    const F = window.deskDrawer.F, { x0, x1, y0, y1 } = box;
     return fmt([[x0, y1, out], [x1, y1, out], [x1, y1, 0], [x1, y0, 0], [x0, y0, 0], [x0, y0, out]].map(F));
   }
   // the card standing at the back of the drawer, as a card pose in the camera ({ c, A, B }: A across it, B down it)
