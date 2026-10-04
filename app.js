@@ -1448,12 +1448,12 @@
   const [mdUnder, mdThings, mdOver, mdKeyG, mdHit] = ['under', 'things', 'over', 'key', 'hit'].map(n => { const g = document.createElementNS(SVG, 'g'); g.id = 'mdrawer-' + n; sheetUnder.before(g); return g; });
   let mdThingsAt = null;                               // (the tray's contents drawn at this travel; they are heavy, so kept)
   function drawMdr() {
-    const r = MD.drawer(mdr.travel, { key: mdr.key === 'lock' ? 'lock' : 'none', turn: mdr.turn, env: { lifted: mdr.held, opened: mdr.opened } });
+    const r = MD.drawer(mdr.travel, { key: mdr.key === 'lock' ? 'lock' : 'none', turn: mdr.turn, tray: { held: mdr.held, env: { opened: mdr.opened } } });
     mdUnder.innerHTML = r.under;
     const at = `${mdr.travel}|${mdr.held}|${mdr.opened}`;
     if (at !== mdThingsAt) { mdThings.innerHTML = r.things; mdThingsAt = at; }
     mdOver.innerHTML = r.over; mdKeyG.innerHTML = r.key;
-    mdHit.innerHTML = `<polygon data-hit="front" points="${r.hit}" fill="transparent"/>` + (r.envHit && mdr.open && !mdr.held ? `<polygon data-hit="envelope" points="${r.envHit}" fill="transparent"/>` : '');
+    mdHit.innerHTML = `<polygon data-hit="front" points="${r.hit}" fill="transparent"/>` + (r.trayHit && mdr.open && !mdr.held ? `<polygon data-hit="tray" points="${r.trayHit}" fill="transparent"/>` : '');
   }
   const mdTween = (ms, step) => new Promise(done => { const t0 = performance.now(); (function frame(now) { const u = Math.min(1, (now - t0) / ms); step(u); drawMdr(); if (u < 1) requestAnimationFrame(frame); else done(); })(t0); });
   // the small sounds here, made in code as the drawer's others are: the tile lifting (a dry scrape of mineral board on its
@@ -1531,6 +1531,7 @@
     const p = MD.deskPose(), [x, y] = deskDrawer.roomF(p.c);
     deskKey2G.innerHTML = MD.oldKey(p, deskDrawer.roomF) + `<ellipse cx="${(x - 14).toFixed(1)}" cy="${y.toFixed(1)}" rx="46" ry="16" fill="transparent"/>`;
   }
+  const KEY_FALL_AT = 330;                            // (where in the frame the view keeps the falling key, px from its top)
   async function keyFalls() {
     // where it starts: at the gap's lower edge, far up (it is about 35 px there), drawn by the near camera (no bend) so
     // it is exactly at the gap; it lands on the desk drawn by the room's (bent), as it lies there
@@ -1540,13 +1541,19 @@
     keyDepth = 1.0;                                    // with the ceiling, then down to the desk's
     mdSound('key-slide');
     await motion(320, u => { const s = easeIO(u); keyLayer.innerHTML = MD.oldKey(between(start, edge, s), flatOrRoom(0)); });
-    lookAt(downRest());
-    // it falls: slow off the edge, faster and faster, turning over once on the way
+    // it falls: slow off the edge, faster and faster, turning over once on the way. The view follows it down, aiming to keep
+    // it a third of the way down the frame (sent straight to the desk, the view went ahead of the key, which left the top of
+    // the frame for half its fall); the spring keeps the following smooth
+    look.rest = downRest(); look.peek = 0; placeZones();
     await motion(760, u => {
       const s = u * u, pose = between(edge, end, s, v3.add(edge.c, [0, 250, -200]), v3.add(end.c, [0, -420, 60]));
       keyDepth = 1.0 + (DESK_FRONT_DEPTH - 1.0) * s;
       keyLayer.innerHTML = MD.oldKey(pose, flatOrRoom(s));
+      // (aiming where it will be a quarter of the fall later: aimed where it was, the view lagged and it landed under the frame)
+      const ua = Math.min(1, u + .25), sa = ua * ua, ahead = between(edge, end, sa, v3.add(edge.c, [0, 250, -200]), v3.add(end.c, [0, -420, 60]));
+      look.target = clamp(flatOrRoom(sa)(ahead.c)[1] - KEY_FALL_AT, 0, look.rest); lookRun();
     });
+    aim();
     keyLayer.innerHTML = '';
     mdr.key = 'desk'; keepMdr(); drawDeskKey2(); mdSound('clink');
     // taking it is not leaving the ceiling to maintenance
@@ -1613,71 +1620,110 @@
     await mdTween(DM.close.ms, u => { mdr.travel = MD.OPEN * DM.close.travel(u); });
     mdr.busy = false;
   }
-  // ---- the envelope: lifted out of the tray and held up (as the cheat sheet's card is: under the drawer's near walls
-  // until it is clear of them); a click opens it and the slip comes up out of it; a click puts it back, opened
+  // ---- the tray (mtray.js): clicked in the open drawer, it is lifted out and held up in front of you, about three times
+  // nearer, its back raised so you look into it (opened at 4:3 the drawer is mostly past the frame's right edge, and the
+  // things are small there; Arnold, 2026-10-04); under the drawer's near walls until it is clear of them, as the cheat
+  // sheet's card. Held: a click on the envelope lifts it out of the tray and holds it up over it; a click opens it and the
+  // slip comes up out of it; a click puts it back in the tray, opened. A click anywhere else puts the tray back.
   const mdCatcher = document.createElement('div');
   Object.assign(mdCatcher.style, { position: 'fixed', inset: '0', zIndex: '50', display: 'none', cursor: 'pointer' });
   document.body.appendChild(mdCatcher);
+  const TR = window.mTray;
   const envAt = (pose, pr, width = 1) => MD.envelope(pose, pr, { opened: mdr.opened, slipOut: mdr.envSlip, width });
-  async function liftEnvelope() {
-    if (mdr.busy || mdr.held || !mdr.open) return;
+  const trayHeld = () => TR.heldPose(), heldPr = s => TR.heldProject(look.rest, s);   // (held: one pose, the picture slid with the view)
+  // the held view: the tray (full detail) and, over it, the envelope if it is out of it
+  let heldTrayHit = null, heldEnvHit = null;
+  function drawHeldTray(envPose = null) {
+    const r = TR.render(trayHeld(), heldPr(1), { env: { lifted: !!envPose || mdr.envHeld, opened: mdr.opened }, width: 1.5 });
+    heldTrayHit = r.hit; heldEnvHit = r.envHit;
+    let svg = r.svg;
+    if (envPose || mdr.envHeld) { const e = envAt(envPose || MD.heldEnvelope(0), heldPr(1), 1.5); svg += e.svg; heldEnvHit = e.hit; }
+    keyLayer.innerHTML = svg;
+  }
+  async function liftTray() {
+    if (mdr.busy || mdr.held || !mdr.open || handsFull()) return;
     mdr.busy = true; mdr.held = true;
-    playtest('envelope: lifted' + (mdr.opened ? ' (opened)' : ''));
-    const from = MD.envelopeLying(mdr.travel), to = MD.heldEnvelope(look.rest);
-    const walls = polysOf(MD.drawer(mdr.travel).over);
-    drawMdr();
+    playtest("m's tray: lifted out");
+    const from = TR.drawerPose(mdr.travel), to = trayHeld(), walls = polysOf(MD.drawer(mdr.travel).over);
+    mdThingsAt = null; drawMdr();
     let clearAt = null;
-    await motion(700, u => {
-      const s = easeIO(u), e = envAt(between(from, to, s, v3.add(from.c, [0, -60, -20]), v3.add(to.c, [0, 30, 40])), roomOrFlat(s), 1 + .5 * s);
-      if (clearAt === null && overlaps(ptsOf(e.svg, 9), walls)) { mdThings.querySelector('[data-env]')?.remove(); mdThings.insertAdjacentHTML('beforeend', `<g data-env="1">${e.svg}</g>`); keyLayer.innerHTML = ''; return; }
-      if (clearAt === null) { clearAt = s; mdThings.querySelector('[data-env]')?.remove(); }
-      keyDepth = DESK_FRONT_DEPTH + (.25 - DESK_FRONT_DEPTH) * (s - clearAt) / (1 - clearAt || 1);
-      keyLayer.innerHTML = e.svg;
+    await motion(800, u => {
+      const sm = easeIO(u), r = TR.render(between(from, to, sm, v3.add(from.c, [0, -70, -30]), v3.add(to.c, [0, 30, 40])), heldPr(sm), { env: { opened: mdr.opened }, width: 1 + .5 * sm, fast: true });
+      if (clearAt === null && overlaps(ptsOf(r.hit), walls)) { mdThings.innerHTML = r.svg; mdThingsAt = null; keyLayer.innerHTML = ''; return; }
+      if (clearAt === null) { clearAt = sm; mdThings.innerHTML = ''; }
+      keyDepth = DESK_FRONT_DEPTH + (.25 - DESK_FRONT_DEPTH) * (sm - clearAt) / (1 - clearAt || 1);
+      keyLayer.innerHTML = r.svg;
     });
-    mdThings.querySelector('[data-env]')?.remove();
-    // an envelope opened before: the slip comes up again
-    if (mdr.opened) await slipUp();
+    mdThingsAt = null; drawMdr();
+    drawHeldTray();
     mdCatcher.style.display = '';
+    mdr.busy = false;
+  }
+  async function putTrayBack() {
+    mdr.busy = true; mdCatcher.style.display = 'none';
+    playtest("m's tray: put back");
+    const from = trayHeld(), to = TR.drawerPose(mdr.travel), walls = polysOf(MD.drawer(mdr.travel).over);
+    const pose = sm => between(from, to, sm, v3.add(from.c, [0, 30, 40]), v3.add(to.c, [0, -70, -30]));
+    let meetAt = 1; for (let k = 0; k <= 40; k++) { const sm = k / 40; if (overlaps(ptsOf(TR.render(pose(sm), heldPr(1 - sm), { fast: true, bare: true }).hit), walls)) { meetAt = sm; break; } }
+    await motion(700, u => {
+      const sm = easeIO(u), r = TR.render(pose(sm), heldPr(1 - sm), { env: { opened: mdr.opened }, width: 1.5 - .5 * sm, fast: true });
+      keyDepth = .25 + (DESK_FRONT_DEPTH - .25) * Math.min(1, sm / (meetAt || 1));
+      if (sm >= meetAt) { keyLayer.innerHTML = ''; mdThings.innerHTML = r.svg; mdThingsAt = null; } else keyLayer.innerHTML = r.svg;
+    });
+    keyLayer.innerHTML = '';
+    mdr.held = false; mdThingsAt = null; drawMdr();
+    mdr.busy = false;
+  }
+  // the envelope, out of the held tray and up over it, and back
+  async function liftEnvelope() {
+    mdr.busy = true;
+    playtest('envelope: lifted' + (mdr.opened ? ' (opened)' : ''));
+    const from = TR.envelopePose(TR.frameOf(trayHeld())), to = MD.heldEnvelope(0);
+    await motion(600, u => drawHeldTray(between(from, to, easeIO(u), v3.add(from.c, [0, -20, -30]), to.c)));
+    mdr.envHeld = true; drawHeldTray();
+    if (mdr.opened) await slipUp();
     mdr.busy = false;
   }
   async function slipUp() {
     mdSound('paper-slide');
-    await motion(520, u => { mdr.envSlip = easeIO(u); keyLayer.innerHTML = envAt(MD.heldEnvelope(look.rest), deskDrawer.proj, 1.5).svg; });
+    await motion(520, u => { mdr.envSlip = easeIO(u); drawHeldTray(); });
   }
   async function openEnvelope() {
     mdr.busy = true;
     playtest('envelope: opened');
     mdSound('paper-flick');
     mdr.opened = true; keepMdr();
-    keyLayer.innerHTML = envAt(MD.heldEnvelope(look.rest), deskDrawer.proj, 1.5).svg;
+    drawHeldTray();
     await wait(160);
     await slipUp();
     mdr.busy = false;
   }
   async function putEnvelopeBack() {
-    mdr.busy = true; mdCatcher.style.display = 'none';
-    playtest('envelope: put back');
-    if (mdr.envSlip > 0) { mdSound('paper-slide'); await motion(300, u => { mdr.envSlip = 1 - easeIO(u); keyLayer.innerHTML = envAt(MD.heldEnvelope(look.rest), deskDrawer.proj, 1.5).svg; }); }
-    mdr.envSlip = 0;
-    const from = MD.heldEnvelope(look.rest), to = MD.envelopeLying(mdr.travel);
-    const walls = polysOf(MD.drawer(mdr.travel).over), pose = s => between(from, to, s, v3.add(from.c, [0, 30, 40]), v3.add(to.c, [0, -60, -20]));
-    let meetAt = 1; for (let k = 0; k <= 60; k++) { const s = k / 60; if (overlaps(ptsOf(envAt(pose(s), roomOrFlat(1 - s)).svg, 9), walls)) { meetAt = s; break; } }
-    await motion(650, u => {
-      const s = easeIO(u), e = envAt(pose(s), roomOrFlat(1 - s), 1.5 - .5 * s);
-      keyDepth = .25 + (DESK_FRONT_DEPTH - .25) * Math.min(1, s / (meetAt || 1));
-      if (s >= meetAt) { keyLayer.innerHTML = ''; mdThings.querySelector('[data-env]')?.remove(); mdThings.insertAdjacentHTML('beforeend', `<g data-env="1">${e.svg}</g>`); } else keyLayer.innerHTML = e.svg;
-    });
-    keyLayer.innerHTML = '';
-    mdr.held = false; mdThingsAt = null; drawMdr();
+    mdr.busy = true;
+    playtest('envelope: put back in the tray');
+    if (mdr.envSlip > 0) { mdSound('paper-slide'); await motion(300, u => { mdr.envSlip = 1 - easeIO(u); drawHeldTray(); }); }
+    mdr.envSlip = 0; mdr.envHeld = false;
+    const from = MD.heldEnvelope(0), to = TR.envelopePose(TR.frameOf(trayHeld()));
+    await motion(550, u => drawHeldTray(between(from, to, easeIO(u), from.c, v3.add(to.c, [0, -20, -30]))));
+    drawHeldTray();
     mdr.busy = false;
   }
-  mdCatcher.addEventListener('pointerdown', e => { e.preventDefault(); if (mdr.busy) return; mdr.opened ? putEnvelopeBack() : openEnvelope(); });
+  // where a click lands on the stage (the held view is drawn in the look's own coordinates)
+  const stagePoint = e => { const r = stage.getBoundingClientRect(); return [(e.clientX - r.left) * 1440 / r.width, (e.clientY - r.top) * 1080 / r.height + look.y]; };
+  const onPoly = (pt, pts) => !!pts && insidePoly(pt, pts.trim().split(/\s+/).map(q => q.split(',').map(Number)));
+  mdCatcher.addEventListener('pointerdown', e => {
+    e.preventDefault(); if (mdr.busy) return;
+    const pt = stagePoint(e);
+    if (mdr.envHeld) { mdr.opened ? putEnvelopeBack() : openEnvelope(); return; }
+    if (onPoly(pt, heldEnvHit)) { liftEnvelope(); return; }
+    putTrayBack();
+  });
   mdHit.addEventListener('pointerdown', e => {
     const hit = e.target.dataset?.hit; if (!hit) return;
     e.preventDefault(); hint.classList.add('gone');
     if (mdr.busy) return;
     if (mdr.key !== 'lock') { rattleMdr(); return; }
-    if (hit === 'envelope') liftEnvelope(); else mdr.open ? closeMdr() : openMdr();
+    if (hit === 'tray') liftTray(); else mdr.open ? closeMdr() : openMdr();
   });
   setTimeout(() => { drawMdr(); drawDeskKey2(); });
 
@@ -2445,7 +2491,8 @@
     const idOf = ch => ch === ' ' ? 'key-Space' : /[a-z]/i.test(ch) ? 'key-' + ch.toUpperCase() : 'key-J';
     const key = (ch, v = VOICE) => { const id = idOf(ch); click('key', false, id, v); setTimeout(() => click('key', true, id, v), 55); };
     // An order ("be a pal and ...") waits for the thing it asked for; when you do it, the system notes it in the log,
-    // quietly, from night 1: "operator compliance: yes (be a pal and read the runbook)". Nothing shows on the tube.
+    // quietly, from night 1: "operator compliance: yes (be a pal and read the runbook)". Nothing shows on the tube
+    // until night 3 (logLine).
     const orders = new Map();                          // what was asked -> the words it was asked in
     function order(what, words) { orders.set(what, words.match(/be a pal[^.!?]*/i)?.[0].toLowerCase().replace(/, chief$/, '') || what); }
     function complied(what) {
@@ -2558,7 +2605,7 @@
 
   // ------------------------------------------------------------ mail
   // The inbox (design.md, story): the welcome, then the night's mail as it arrives, corporate life with something
-  // slightly off in each one, every message setting something up for later; and the previous operator's notes.
+  // slightly off in each one, every message setting something up for later; and Vigil's notes on the maintenance tools.
   // "You have new mail." lands above the prompt like Glenn's lines. mail shows the inbox, mail <n> opens one
   // (Arnold: one command, laid out properly). The night's mail comes again every night: it is the
   // same night.
@@ -2703,19 +2750,16 @@
   // anything the operator does keeps them from sitting idle (idle past a real minute, energy drains faster)
   for (const ev of ['keydown', 'pointerdown', 'wheel']) addEventListener(ev, () => shift?.poke(), { capture: true, passive: true });
   const lastAlert = new Map();                         // unit -> real time it last alerted, for reminders
-  // what the previous operator says about each cartridge as it turns up, and how it reaches you
+  // how each cartridge is announced as it turns up: Vigil's system mail, cheerful (Arnold, 2026-10-04: M. is someone
+  // who already put it down, not a guide, so the pointers are the company's). Why it came, then what and where.
   const NOTES = {
     DEFRAG: {
-      body: ["when one gets stuck and a reboot won't hold it:", 'DEFRAG. desk drawer, next to pong.'],
-      won: { head: '(sent when you beat pong)', pre: ['not bad. I left you something.'] },
-      calm: { head: '(sent by cron, on a quiet night)', post: ["(or beat my score at pong. it's quicker.)"] },
-      timer: { head: '(sent by cron, on a timer)', post: ["(or beat my score at pong. it's quicker.)"] },
+      body: ['Maintenance tools unlocked: DEFRAG (desk drawer, tray 2).', "For units that won't hold a reboot."],
+      won: 'PONG match won!', calm: 'Thirty quiet minutes on the racks!', timer: 'Scheduled release.',
     },
     ROUTE: {
-      body: ['when a rack starts dropping packets:', 'ROUTE. desk drawer, third along.'],
-      won: { head: '(sent when you fixed a stuck unit)', pre: ['you put it back together. good.'] },
-      calm: { head: '(sent by cron, on a quiet night)', post: ["(or win at defrag. it's quicker.)"] },
-      timer: { head: '(sent by cron, on a timer)', post: ["(or win at defrag. it's quicker.)"] },
+      body: ['Maintenance tools unlocked: ROUTE (desk drawer, tray 3).', 'For racks dropping packets.'],
+      won: 'DEFRAG: unit restored!', calm: 'Thirty quiet minutes on the racks!', timer: 'Scheduled release.',
     },
   };
   function startShift() {
@@ -2748,7 +2792,6 @@
     tty2.open = tty2.closed = null;
     room.darkNoticed = false;                          // Glenn notices the monitor going dark, once a night
     room.routeTaught = false; room.routeWon = false;   // the night's first ROUTE teaches; 23 answers once it is won
-    room.mShortcut = false;                            // M.'s note on doing several at once (night 1, when it gets busy)
     ghostAt = 75 + Math.random() * 45; ghostDone = false;   // the key that presses itself: 00:15 to 01:00
   }
   startShift();
@@ -2776,16 +2819,12 @@
     } else if (e.type === 'relieved' || e.type === 'dawn') {
       endOfNight(e.report);
     } else if (e.type === 'found') {
-      // the next cartridge turns up, pointed to by the previous operator: a message on the cartridge just beaten
-      // (the fast path), or a note left on a timer for a quiet night (the slow path, which says so)
+      // the next cartridge turns up, announced by Vigil: after a first win on the one before (the fast path), or a
+      // quiet stretch or a timer (the slow path, which says so). As mail, never onto the screen mid-typing.
       if (!tray.carts.some(c => c.label === e.cart) && room.cart !== e.cart) { tray.carts.push({ slot: CARTS[e.cart].slot, label: e.cart, lift: 0 }); drawDrawer(); }
-      const n = NOTES[e.cart], src = n[e.how] || n.calm;
-      // one quote: the note's own lines between the previous operator's words before and after (short enough not to wrap)
-      const said = [...(src.pre || []), ...n.body, ...(src.post || [])];
-      // it comes as mail (Arnold, 2026-09-30: it used to land on the screen mid-typing), from no one it will name
-      // (the previous operator stays a mystery), how it got here
-      // in the first line, then the note
-      inbox.add({ from: '(unknown)', addr: '', subject: '(no subject)', body: () => [{ text: src.head, cls: 'dim' }, '', ...said] });
+      const n = NOTES[e.cart], why = n[e.how] || n.calm;
+      inbox.add({ from: 'Vigil Systems', addr: 'tools@site4.vigil', subject: `Maintenance tools unlocked: ${e.cart}`,
+        body: () => [why, ...n.body, '', { text: 'Vigil Systems. Someone is always awake.', cls: 'dim' }] });
     }
   }
   setInterval(() => {
@@ -2801,15 +2840,6 @@
     if (!woke && shift.t >= 344 && shift.t < 380 && term.inShell() && look.rest === 0 && !document.hidden) { woke = true; wakeUp(); }
     // the first dip in energy: the company line, then coffee (one moment, not two: the coffee line used to come at 45%)
     if (shift.energy < .5 && glenn.once('coffee', 'Stay sharp, chief. Operators found asleep get reassigned. Company policy!', "You're fading on me. Be a pal and have some coffee. Give the mug a click.")) glenn.order('coffee', 'be a pal and have some coffee');
-    // M.'s first shortcut (design.md: one each night), help arriving when the racks pile up late on night 1: past
-    // 03:00 with two problems open, or at 04:15 whatever happens. It names two units that are down right then.
-    if (shift.level === 1 && !room.mShortcut && !shift.over && ((shift.t >= 240 && shift.open().length >= 2) || shift.t >= 315)) {
-      room.mShortcut = true;
-      const down = shift.open().filter(o => o.kind === 'DOWN' && !o.fixing).map(o => o.unit), [a, b] = down.length >= 2 ? down : ['L27', 'L41'];
-      inbox.add({ from: '(unknown)', addr: '', subject: '(no subject)', body: () => [{ text: '(sent by cron, when it got busy)', cls: 'dim' }, '',
-        "you don't have to do them one at a time.", `reboot ${a} ${b}`, 'reroute takes more than one too.', '', "he won't like it.",
-        { text: '(it was never my plan to stay this long.)', cls: 'dim' }] });   // ("my plan": a breadcrumb to finger m)
-    }
     // once a night, while you sit looking at an empty prompt, the M key goes down by itself
     if (!ghostDone && !shift.over && shift.t >= ghostAt && look.rest === 0 && !document.hidden && term.idleFor() > 5000 && term.lineEmpty()) { ghostDone = true; ghostKey('m'); }
     // an incident left alone says so again, without the fix: the player works that out
@@ -3004,20 +3034,14 @@
     setTimeout(async () => {
       nightOver.hidden = false; requestAnimationFrame(() => nightOver.classList.add('shown'));
       // Asleep with the racks still running (design.md: sleep is the exit, but not while the racks run): before
-      // anything else, one line on the black screen, typed slowly on the previous operator's switch. Every lost
-      // night by sleep, until the finale, where the racks go dark and sleep means something else.
+      // anything else, one line on the black screen. It appears the way Vigil's lines do, whole and without a sound
+      // (Arnold, 2026-10-04: no longer typed on the previous operator's switch; whose line it is, is never settled).
+      // Every lost night by sleep, until the finale, where the racks go dark and sleep means something else.
       if (r.reason === 'asleep') {
         what.hidden = choices.hidden = true; yet.hidden = false; yet.textContent = '';
-        const voice = M_VOICE(); await loadPack(voice.pack);
         await wait(1600);
-        borrowedVoice = voice;
-        const msg = 'not yet.';
-        for (let i = 0; i < msg.length; i++) {
-          yet.textContent += msg[i]; tap(msg[i]);
-          await wait(msg[i] === ' ' ? 180 : 110 + rnd(120) + (i === 2 ? 700 : 0));   // a hesitation after "not"
-        }
-        borrowedVoice = null;
-        await wait(2400);
+        yet.textContent = 'not yet.';
+        await wait(3600);
         yet.classList.add('gone');
         await wait(1300);
         yet.hidden = true; yet.classList.remove('gone');
@@ -3089,6 +3113,10 @@
     if (KEEP.test(text)) keep(l);
     logLines.push(l); if (logLines.length > 300) logLines.shift();
     logListeners.forEach(fn => fn(l));
+    // night 3: Vigil stops hiding the compliance lines (Arnold, 2026-10-04). Each prints dim on the tube as it is
+    // logged, so the pattern shows itself to a player who never got into m's account (m's history has the grep).
+    const said = text.match(/operator compliance: .*/);
+    if (said && shift?.level === 3) term.announce([{ text: `${shift.clock().slice(0, 5)}  ${said[0]}`, cls: 'dim' }]);
     return l;
   }
   function randomLog() {
@@ -3271,8 +3299,8 @@
         "  isn't responding    reboot <unit>",
         '  is running hot      reroute <unit>',
         { text: '                      (left hot, it shuts down)', cls: 'dim' },
-        "  won't stay fixed    ask the last operator;",
-        { text: '                      their things are in the desk.', cls: 'dim' },
+        "  won't stay fixed    a maintenance cartridge,",
+        { text: '                      in the desk drawer.', cls: 'dim' },
         '',
         '  rack-left           L10 L14 L20 L27 L33 L41 L47',
         '  rack-right          R10 R17 R29 R47',
@@ -3291,6 +3319,12 @@
     };
     // the third lost-night piece: a file M. left in the home directory, hidden (ls -a)
     if (piece(2)) FS['.plan'] = ['i stopped counting the scratches at forty.', '— m'];
+    // M.'s old shell history, left in the home directory, hidden (ls -a). The only trace of doing several units in
+    // one line (Arnold, 2026-10-04): batch fixing is never advertised; it sits here among old commands from 2019.
+    FS['.history'] = [
+      '2019-03-29 23:02  status', '2019-03-29 23:41  reboot L20', '2019-03-30 01:17  status', '2019-03-30 01:18  cat runbook',
+      '2019-03-31 02:52  reboot L20 L47 L33', '2019-03-31 02:53  status', '2019-03-31 03:20  reroute R17', '2019-04-01 23:06  top',
+      '2019-04-01 23:07  status'];
     const isDir = n => n && typeof n === 'object' && !Array.isArray(n);
     const readFile = n => Array.isArray(n) ? n : typeof n === 'function' ? n() : null;
     const listDir = n => Object.keys(n).map(k => isDir(n[k]) ? k + '/' : k);
@@ -3809,7 +3843,7 @@
           head: ` defrag ${u}`, won, title: won ? 'defrag complete' : 'defrag failed',
           lines: [['unit', won ? `${u} back in service` : `${u} still stuck`, won ? 'ok' : 'alert'],
             ['files', `${whole} of ${d.sizes.length} whole`], ['time', won ? secs(took) : why], ['energy', energyDelta(e0)]],
-          foot: won ? (handed.length ? 'someone sent you mail.' : 'the racks settle.') : 'it keeps writing.',
+          foot: won ? (handed.length ? 'you have new mail.' : 'the racks settle.') : 'it keeps writing.',
         }, () => { stopProc(); for (const e of handed) showEvent(e); });
       };
       const timer = setInterval(() => {
@@ -3948,7 +3982,7 @@
           head: ` route ${rack}`, won, title: won ? 'route delivered' : 'route lost',
           lines: [['rack', won ? `${rack} passing traffic` : `${rack} still dropping`, won ? 'ok' : 'alert'],
             ['hops', `${g.reached()} of ${g.total}`], ['dropped', `${g.drops()} of ${g.DROPS}`], ['time', won ? secs(took) : why], ['energy', energyDelta(e0)]],
-          foot: won ? (handed.length ? 'someone sent you mail.' : 'traffic flows again.') : 'the rack keeps dropping.',
+          foot: won ? (handed.length ? 'you have new mail.' : 'traffic flows again.') : 'the rack keeps dropping.',
         }, () => { stopProc(); for (const e of handed) showEvent(e); });
       };
       const tick = () => {
@@ -4200,7 +4234,7 @@
           lines: [['score', `${you} - ${cpu}`], ['longest', `${longest} hit${longest === 1 ? '' : 's'}`], ['time', secs(performance.now() - t0)], ['energy', energyDelta(pongE0)],
             { centre: [] }, arcade(was)],
           finale,
-          foot: handed.length ? 'someone sent you mail.' : won ? 'the cpu paddle waits a moment.' : 'it has had a lot of practice.',
+          foot: handed.length ? 'you have new mail.' : won ? 'the cpu paddle waits a moment.' : 'it has had a lot of practice.',
         }, () => { stopProc(); for (const e of handed) showEvent(e); if (longest >= 15 && steadying) setTimeout(keyFromPong, 600); });
       };
       const t = setInterval(step, 85);
@@ -4273,7 +4307,7 @@
       NOTES: [
         'NOTES  (left by the previous operator)',
         '',
-        '- the left knob is power. the right one is not volume. I checked.',
+        '- the right knob is not volume. I checked.',
         '- rack-left unit 23 makes a noise around 3am. it is fine. probably.',
         '- if the screen goes blue, that is just the screen.',
         "- I got to 14 rallies on this. beat that and I'll tell you something.",

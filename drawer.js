@@ -712,6 +712,12 @@
   // back to front: whose, how thick (back flap to front flap, in depth), which cut, how many sheets. A sheet or two
   // each: every edge in the stack stands 6 px or more from the next on screen, or two lines read as one doubled.
   const WHO = [['you', .007, 2, 1], ['m', .007, 0, 0], ['aw', .007, 1, 1], ['rd', .013, 0, 2], ['jk', .007, 1, 1], ['ts', .007, 0, 1]];
+  // (window.FILE_PAPERS, proposed 2026-10-04 for the old operators' letters, a stills page only until approved: each
+  // folder's sheets as the real papers in it: each its width in mm, or { w, at, sink } with at its centre's offset in px
+  // from the folder's middle, sink how far lower it stands (px), and down: true for one that sits too low in its folder
+  // to be seen (it keeps its place in the stack's spacing, and is not drawn), e.g. { ts: [{ w: 216, at: 4 }], jk: [152] };
+  // a folder not named keeps its sheets as they are)
+  const PAPERS_MM = window.FILE_PAPERS || null;
   // the folders' places, worked out once with the drawer fully out (they keep them while it moves)
   let STACK = null;
   function fileStack() {
@@ -728,7 +734,13 @@
         // each back flap stands where its top is GAP px or more below the front flap before it, on screen
         if (out.length) { const pf = out[out.length - 1]; fb = pf.fd + .002; while (XS.some(x => F([x, tops, fb])[1] < F([x, tops + FL, pf.fd])[1] + GAP)) fb += .0002; }
         // the sheets evenly between the flaps in depth and in height, so the edges step down evenly; inset by a seeded amount
-        const papers = Array.from({ length: np }, (_, k) => ({ d: fb + th * (k + 1) / (np + 1), y: tops + FL * (k + 1) / (np + 1), a: xi0 + 22 + r() * 12, b: xi1 - 16 - r() * 22 }));
+        const own = PAPERS_MM?.[who], n = own ? own.length : np;
+        const papers = Array.from({ length: n }, (_, k) => {
+          const a = xi0 + 22 + r() * 12, b = xi1 - 16 - r() * 22;
+          if (!own) return { d: fb + th * (k + 1) / (n + 1), y: tops + FL * (k + 1) / (n + 1), a, b };
+          const o = typeof own[k] === 'number' ? { w: own[k] } : own[k], w = o.w / PX_MM, mid = (xi0 + xi1) / 2 + (o.at ?? (r() - .5) * 16);
+          return { d: fb + th * (k + 1) / (n + 1), y: tops + FL * (k + 1) / (n + 1) + (o.sink || 0), a: mid - w / 2, b: mid + w / 2, down: !!o.down };
+        });
         out.push({ who, fb, fd: fb + th, cut, papers });
       }
       return out;
@@ -747,7 +759,7 @@
     let files = null;
     for (let fb0 = -.02; fb0 <= .03 && !files; fb0 += .0002) { const t = build(fb0); if (clean(t) && tabsShow(t)) files = t; }
     // relative to the drawer, so they move with it
-    STACK = { files: (files || build(.006)).map(f => ({ ...f, fb: f.fb - D, fd: f.fd - D, papers: f.papers.map(p => ({ ...p, d: p.d - D })) })), cuts, xi0, xi1 };
+    STACK = { files: (files || build(.006)).map(f => ({ ...f, fb: f.fb - D, fd: f.fd - D, papers: f.papers.map(p => ({ ...p, d: p.d - D })) })), cuts, xi0, xi1, clean: !!files };
     return STACK;
   }
   // where things go: the night-1 polaroid loose on the folders, and standing in your folder once filed. Loose, it lies
@@ -760,7 +772,7 @@
      filed }] (loose on the folders, or standing in your folder); initials: on your tab (blank until something is
      filed). Returns { opening, inner (clip to hole), outer, front, hole, hits: { front, loose, filed } }. */
   let TAB_IDS = 0;
-  function renderFile({ travel = 0, lock = {}, photos = [], initials = '' } = {}) {
+  function renderFile({ travel = 0, lock = {}, photos = [], initials = '', lifted = null } = {}) {
     const { x0, x1, y0, y1, rim, tops, wall, plate, depth } = FILE;
     const D = FILE.travel * travel, back = D - depth, dn = D - plate, xi0 = x0 + wall, xi1 = x1 - wall;
     const inner = [], outer = [], hits = {};
@@ -811,7 +823,7 @@
             + `<g clip-path="url(#${cid})"><text transform="matrix(${m.join(' ')})" x="0" y="0" text-anchor="middle" ${typed ? `font-family="ui-monospace, Consolas, monospace" font-size="${TAB.font * .78}" letter-spacing=".6"` : `font-family="Caveat, cursive" font-size="${TAB.font}"`} fill="#6E6E6C">${text}</text></g>`);
         }
         // the sheets, and anything filed here standing among them, far to near
-        const inIt = [...f0.papers.map(p => ({ d: p.d + D, paper: p })), ...(f.who === 'you' ? filed.map((p, i) => ({ d: f.fb + (f.fd - f.fb) * (i + 1) / (filed.length + 2), photo: p })) : [])].sort((a, b) => a.d - b.d);
+        const inIt = [...(f.who === lifted ? [] : f0.papers.filter(p => !p.down)).map(p => ({ d: p.d + D, paper: p })), ...(f.who === 'you' ? filed.map((p, i) => ({ d: f.fb + (f.fd - f.fb) * (i + 1) / (filed.length + 2), photo: p })) : [])].sort((a, b) => a.d - b.d);
         for (const it of inIt) {
           if (it.paper) {
             const p = it.paper, top = crest(null, p.y, p.a, p.b);
@@ -845,7 +857,12 @@
     // and side, as one), so rounded corners meet what is behind them. Shut, the block is all inside the pedestal: only
     // its face shows.
     const outline = z => TANKER ? roundRect(x0, x1, y0, y1, R_DRAWER, z) : rect(x0, x1, y0, y1, z);
-    let front = D > .001 ? `<polygon points="${pts(hull([...outline(dn), ...outline(D)]))}" fill="#E2E2E0" ${INK}/>` : '';
+    // (its outline the block's silhouette edge by edge, every edge bent as the face's are: below and right of the eye you
+    // see its top, its left side and its face. A convex hull of the two outlines, as it was until 2026-10-04, drew the
+    // top's back edge as a straight chord up to 3 px above the bent edge, and the sheets the folders were placed against
+    // the bent edge showed as slivers over the chord.)
+    const block = TANKER ? hull([...outline(dn), ...outline(D)]) : bent([[x0, y0, dn], [x1, y0, dn], [x1, y0, D], [x1, y1, D], [x0, y1, D], [x0, y1, dn]]);
+    let front = D > .001 ? `<polygon points="${pts(block)}" fill="#E2E2E0" ${INK}/>` : '';
     front += fileFace(D, lock) + (lock.key ? lockKey(D, lock.turn || 0) : '');
     hits.front = pts(outline(D));
     // the opening in the pedestal, dark, square like the box coming out of it; only while it is out

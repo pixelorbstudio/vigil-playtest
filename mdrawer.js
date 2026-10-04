@@ -123,104 +123,11 @@
   }
   const lockMaxA = out => INSIDE + out;
 
-  // ---- the tray and M.'s things. A shallow pencil tray resting near the drawer's top, wall to wall; what lies in it, in
-  // its own place: x across the front (px), f how far forward with the drawer open (0 the pedestal's face, 1 the front).
-  // Everything is real size (the room's millimetre), flat-shaded, lit as the mug is.
-  const TRAY = { y: BOX.y0 + 30, x0: BOX.x0 + BOX.wall, x1: BOX.x1 - BOX.wall, f1: 1 - .012 / OPEN };
-  const worldD = (f, out) => f * OPEN - (OPEN - out);
-  // a frame lying on the tray at (x, f), turned by turn about the vertical: a along (turn 0: to the right), b away from you
-  // (turn 0), n up; millimetres in
-  function trayFrame(x, f, turn, out) {
-    const A = [Math.cos(turn), 0, Math.sin(turn)], N = [0, -1, 0], B = V3.cross(N, A);   // (B away from you at turn 0; N = A x B)
-    const C = dd().toCamF([x, TRAY.y, worldD(f, out)]);
-    return { frame: (a, b, n) => [0, 1, 2].map(i => C[i] + (A[i] * a + B[i] * b + N[i] * n) * MM), A, B, N, C };
-  }
-  // a loop sampled so its projection steps 0.2 px or less: rounded rectangles (tangent arcs), circles, straight runs
-  const sampleLoop = (corners, step) => {           // corners: [[a, b, r]] counter-clockwise (as key3d.js rounded)
-    const n = corners.length, out = [];
-    for (let i = 0; i < n; i++) {
-      const [px, py] = corners[(i - 1 + n) % n], [cx, cy, r] = corners[i], [nx, ny] = corners[(i + 1) % n];
-      if (!r) { out.push([cx, cy]); continue; }
-      const nu = v => { const l = Math.hypot(...v); return [v[0] / l, v[1] / l]; }, u = nu([px - cx, py - cy]), v = nu([nx - cx, ny - cy]);
-      const half = Math.acos(Math.max(-1, Math.min(1, u[0] * v[0] + u[1] * v[1]))) / 2, along = r / Math.tan(half), bis = nu([u[0] + v[0], u[1] + v[1]]), dc = r / Math.sin(half);
-      const C = [cx + bis[0] * dc, cy + bis[1] * dc];
-      const t0 = Math.atan2(cy + u[1] * along - C[1], cx + u[0] * along - C[0]), t1 = Math.atan2(cy + v[1] * along - C[1], cx + v[0] * along - C[0]);
-      let dt = t1 - t0; while (dt > Math.PI) dt -= 2 * Math.PI; while (dt < -Math.PI) dt += 2 * Math.PI;
-      const m = Math.max(2, Math.ceil(Math.abs(dt) * r / step));
-      for (let k = 0; k <= m; k++) out.push([C[0] + r * Math.cos(t0 + dt * k / m), C[1] + r * Math.sin(t0 + dt * k / m)]);
-    }
-    const fine = [];
-    for (let i = 0; i < out.length; i++) { const p = out[i], q = out[(i + 1) % out.length], k = Math.max(1, Math.ceil(Math.hypot(q[0] - p[0], q[1] - p[1]) / step)); for (let j = 0; j < k; j++) fine.push([p[0] + (q[0] - p[0]) * j / k, p[1] + (q[1] - p[1]) * j / k]); }
-    return fine;
-  };
-  const circleLoop = (c, r, step) => { const m = Math.max(24, Math.ceil(2 * Math.PI * r / step)); return Array.from({ length: m }, (_, k) => [c[0] + r * Math.cos(2 * Math.PI * k / m), c[1] + r * Math.sin(2 * Math.PI * k / m)]); };
-  // a flat thing (paper, a strap, glass): its loop at height n, filled and outlined
-  const flat = (loop, frame, n, project, fill, extra = '') => { const ps = loop.map(([a, b]) => project(frame(a, b, n))); return `<polygon points="${fmt(ps)}" fill="${fill}" ${INK} ${extra}/>`; };
-  // the step in mm for 0.2 px here (the tray is about 0.87 px a mm across, half that in depth)
-  const STEP = .2;
+  // ---- the tray and M.'s things: mtray.js (lifted out of the drawer to be looked at)
 
-  // the stopped watch: a case 40 mm across and 10 high, its dial the case's top, two hands at 03:11 (the minute old.log
-  // has M. going home); a strap each side, lying flat (3 mm leather drawn as paper: its edge would be a 2.5 px sliver)
-  const WATCH = { x: 1404, f: .3, turn: .18, r: 20, h: 10, strap: 40 };
-  function watch(out, project) {
-    const { frame } = trayFrame(WATCH.x, WATCH.f, WATCH.turn, out), r = WATCH.r;
-    const strap = (b0, b1) => sampleLoop([[-9, b0, 0], [9, b0, 0], [9, b1, 4], [-9, b1, 4]].map(([a, b, rr]) => [a, b, rr]), STEP);
-    let s = flat(strap(0, r + WATCH.strap), frame, .5, project, '#E2E2E0') + flat(strap(0, -r - WATCH.strap), frame, .5, project, '#E2E2E0');
-    const fr = (a, b, n) => frame(a, b, n + WATCH.h / 2 + .5);
-    const hands = (f, p, n) => {
-      const o = p(f(0, 0, n)), hand = (deg, len) => { const t = deg * Math.PI / 180, q = p(f(len * Math.sin(t), len * Math.cos(t), n)); return `M${o[0].toFixed(2)},${o[1].toFixed(2)}L${q[0].toFixed(2)},${q[1].toFixed(2)}`; };
-      return `<path d="${hand((3 + 11 / 60) * 30, 9) + hand(11 * 6, 14)}" fill="none" stroke="#9A9A98" stroke-width="1" stroke-linecap="round"/>`;
-    };
-    s += window.solid.extrusion({ outer: circleLoop([0, 0], r, STEP / .9), t: WATCH.h }, fr, project, { cap: ['#F6F6F4', '#EEEEEC'], wall: ['#E2E2E0', '#D6D6D4'], hole: ['#D6D6D4', '#D0D0CE'], floor: ['#E2E2E0', '#DADAD8'], pocketWall: ['#D9D9D7', '#D2D2D0'] }, { stamp: hands });
-    return s;
-  }
-  // a pack of gum: a box 74 x 21 x 12 mm, a printed band across its top
-  const GUM = { x: 1398, f: .55, turn: -.06, L: 74, W: 21, H: 12 };
-  function gum(out, project) {
-    const { frame } = trayFrame(GUM.x, GUM.f, GUM.turn, out), { L, W, H } = GUM;
-    const fr = (a, b, n) => frame(a, b, n + H / 2);
-    const box = sampleLoop([[-L / 2, -W / 2, 0], [L / 2, -W / 2, 0], [L / 2, W / 2, 0], [-L / 2, W / 2, 0]], STEP);
-    const band = (f, p, n) => { const q = sampleLoop([[-11, -W / 2, 0], [11, -W / 2, 0], [11, W / 2, 0], [-11, W / 2, 0]], STEP).map(([a, b]) => p(f(a, b, n))); return `<polygon points="${fmt(q)}" fill="#E2E2E0" ${INK}/>`; };
-    return window.solid.extrusion({ outer: box, t: H }, fr, project, { cap: ['#F0F0EE', '#E6E6E4'], wall: ['#E6E6E4', '#DADAD8'], hole: ['#D6D6D4', '#D0D0CE'], floor: ['#E2E2E0', '#DADAD8'], pocketWall: ['#D9D9D7', '#D2D2D0'] }, { stamp: band });
-  }
-  // a pen: 120 mm, 11 across, its cap a shade darker, a pointed metal tip (lathe.js)
-  const PEN = { x: 1372, f: .62, turn: -.62, L: 120, r: 5.5 };
-  function pen(out, project) {
-    const { frame } = trayFrame(PEN.x, PEN.f, PEN.turn, out), { L, r } = PEN;
-    const C = frame(0, 0, r), A = V3.sub(frame(1, 0, r), C), U = V3.sub(frame(0, 0, r + 1), C), V = V3.sub(frame(0, 1, r), C);
-    // its cap's end a short cone, as its tip is (a chamfer put two ring lines 3 px apart; rounded, its many small bands'
-    // silhouettes piled into a dark spot; flat, the disc seen nearly edge-on was a bold line, its two sides 0.3 px apart)
-    const prof = [[0, 0, 'tip'], [4, 1.4, 'tip'], [16, r, 'body'], [70, r, 'cap'], [L - 9, r, 'cap'], [L, 0, 'cap']];
-    return window.lathe.compose(window.lathe.lathe(prof, { C, A, U, V }, project, { tip: ['#E2E2E0', '#D6D6D4'], body: ['#ECECEA', '#E0E0DE'], cap: ['#DEDEDC', '#D2D2D0'] }, { sectors: 720, split: false, seal: true, matEdges: true }));
-  }
-  // reading glasses, folded, lying on their lenses: wire rims (a wire is a line), the glass a flat fill a shade off the
-  // tray's; the two temples folded across on top, the bridge an arch over the gap. Old-fashioned large lenses (46 x 40 mm):
-  // each temple has to stand 6 px from the lens's edges and from the other, and a 28 mm lens leaves only 14 px for three.
-  const GLASSES = { x: 1312, f: .69, turn: .04, lw: 46, lh: 40, gap: 14, rTop: 14, rBot: 12, n: 9, temples: [-11.5, 1], tn: 12 };
-  function glasses(out, project) {
-    const { frame } = trayFrame(GLASSES.x, GLASSES.f, GLASSES.turn, out), { lw, lh, gap, rTop, rBot, n, temples, tn } = GLASSES, cx = gap / 2 + lw / 2;
-    const lens = s => sampleLoop([[s * cx - lw / 2, -lh / 2, rBot], [s * cx + lw / 2, -lh / 2, rBot], [s * cx + lw / 2, lh / 2, rTop], [s * cx - lw / 2, lh / 2, rTop]], STEP);
-    const wire = pts => `<path d="${pathOf(pts.map(([a, b, h]) => project(frame(a, b, h))))}" ${LINE}/>`;
-    const curve = (m, f) => Array.from({ length: m + 1 }, (_, k) => f(k / m));
-    let svg = flat(lens(-1), frame, n, project, '#EEEEEC') + flat(lens(1), frame, n, project, '#EEEEEC');
-    // the bridge: an arch from rim to rim, from where the inner top corners' arcs pass a little under the top
-    const bb = lh / 2 - 3, ae = (gap / 2) + rTop - Math.sqrt(rTop * rTop - Math.pow(bb - (lh / 2 - rTop), 2));
-    svg += wire(curve(Math.ceil(2 * ae / STEP), u => [-ae + 2 * ae * u, bb + 3 * Math.sin(Math.PI * u), n + 1.5 * Math.sin(Math.PI * u)]));
-    // the temples: from each hinge, at its lens's outer edge, across to the far lens (their ends lie on it)
-    const hinge = s => s * (cx + lw / 2), reach = 2 * cx + 12, temple = (s, b) => wire(curve(Math.ceil(reach / STEP), u => [hinge(s) - s * reach * u, b, tn]));
-    svg += temple(1, temples[1]) + temple(-1, temples[0]);
-    return svg;
-  }
-  // the envelope from IT, a C6 (162 x 114 mm), sealed until it is opened, lying face up on the tray: drawn in its own
-  // card frame (u across its long side, v down it), as when it is held up (envelope() below)
-  const ENV = { w: 162, h: 114 };
-  const ENV_AT = { x: 1312, f: .26, turn: .05 };   // (at 1300 its long edge ran 2 px from the left wall's)
-  function envelopeLying(out) {
-    // its long side toward you, the flap's edge on the left: A (u) toward you, B (v) to the right, turned a little
-    const t = ENV_AT.turn, A = [-Math.sin(t), 0, -Math.cos(t)], B = [Math.cos(t), 0, -Math.sin(t)];
-    const C = dd().toCamF([ENV_AT.x, TRAY.y, worldD(ENV_AT.f, out)]);
-    return { c: V3.add(C, [0, -.4 * MM, 0]), A, B };
-  }
+  // the envelope from IT, 150 x 86.5 mm (the stills' proportions), sealed until it is opened, lying face up in the tray
+  // (mtray.js places it): drawn in its own card frame (u across its long side, v down it), wherever it is
+  const ENV = { w: 150, h: 86.5 };
   // the envelope (and, open, the slip up out of it) through a projection. pose: { c, A across, B down }; opened: the flap
   // up; slipOut 0..1: how far the slip has come up. Its printing only where its letters are 6 px or more; its lines
   // sampled so they step 0.2 px of the screen.
@@ -275,38 +182,22 @@
   // held up in front of you (where the slips are held), a little turned: about 520 px across
   function heldEnvelope(rest) {
     const Z = 1500 * ENV.w * MM / 520, r = -2.5 * Math.PI / 180;
-    return { c: [0, (rest + 500 - 813) * Z / 1500, Z], A: [Math.cos(r), Math.sin(r), 0], B: [-Math.sin(r), Math.cos(r), 0] };
+    return { c: [0, (rest + 440 - 813) * Z / 1500, Z], A: [Math.cos(r), Math.sin(r), 0], B: [-Math.sin(r), Math.cos(r), 0] };   // (above the held tray)
   }
 
   // ---- the drawer and its contents at out (0 shut .. OPEN). key: 'none' | 'lock' (and turn, 0..1, and keyOut: key mm
-  // short of home); env: { lifted, opened }. Returns { under, things, over, key, hit, envHit }: the drawer's inside, what
-  // lies in the tray, its near walls and front, the key in the lock (over the front), and where clicks go.
-  // Things show once wholly out of the pedestal (inside it they are in the dark of the opening), as the cheat sheet's card.
-  function drawer(out, { key = 'none', turn = 0, keyOut = 0, env = {} } = {}) {
-    const d = window.cheatSheet.drawer(out, BOX), F = dd().F, project = dd().roomF;
-    let things = '', envHit = null;
-    if (out > .0005) {
-      // the tray: wall to wall, from the pedestal's face to the front (its near edge under the front)
-      // (runs across sampled at every px, so the desk's bend curves them; runs in depth are straight on the screen)
-      const run = (a, b) => { const n = Math.max(1, Math.ceil(Math.abs(b[0] - a[0]))); return Array.from({ length: n }, (_, k) => [a[0] + (b[0] - a[0]) * k / n, a[1], a[2] + (b[2] - a[2]) * k / n]); };
-      const back = Math.max(0, worldD(0, out)), front = worldD(TRAY.f1, out);
-      if (front > back) {
-        const q = [[TRAY.x0, TRAY.y, back], [TRAY.x1, TRAY.y, back], [TRAY.x1, TRAY.y, front], [TRAY.x0, TRAY.y, front]];
-        const ps = q.flatMap((p, i) => run(p, q[(i + 1) % 4])).map(F);
-        things += `<polygon points="${fmt(ps)}" fill="#E6E6E4" ${INK}/>`;
-      }
-      const outOf = f => worldD(f, out) >= .0005;          // wholly out of the pedestal: its back past the face
-      const R = OPEN * 1765;                               // the drawer's depth in mm (f to mm)
-      if (outOf(ENV_AT.f - ENV.w / 2 / R) && !env.lifted) { const e = envelope(envelopeLying(out), project, { opened: env.opened }); things += e.svg; envHit = e.hit; }
-      if (outOf(WATCH.f - (WATCH.r + WATCH.strap) / R)) things += watch(out, project);
-      if (outOf(GUM.f - GUM.W / R)) things += gum(out, project);
-      if (outOf(GLASSES.f - GLASSES.lh / R)) things += glasses(out, project);
-      if (outOf(PEN.f - .5 * PEN.L / R)) things += pen(out, project);
-    }
+  // short of home); tray: { held, env: { lifted, opened } }. Returns { under, things, over, key, hit, trayHit }: the drawer's
+  // inside, the tray with what lies in it, its near walls and front, the key in the lock (over the front), where clicks go.
+  // The tray shows once it is wholly out of the pedestal (inside it, it is in the dark of the opening), as the cheat
+  // sheet's card does.
+  function drawer(out, { key = 'none', turn = 0, keyOut = 0, tray = {} } = {}) {
+    const d = window.cheatSheet.drawer(out, BOX), project = dd().roomF, TR = window.mTray;
+    let things = '', trayHit = null;
+    if (out >= TR.outAt() && !tray.held) { const r = TR.render(TR.drawerPose(out), project, { env: tray.env || {} }); things = r.svg; trayHit = r.hit; }
     let keySvg = '';
     if (key === 'lock') keySvg = oldKey(lockPose(keyOut, turn, out), project, { maxA: lockMaxA(keyOut), tag: false });
-    return { under: d.under, things, over: d.over + keyhole(out), key: keySvg, hit: window.cheatSheet.drawerHit(out, BOX), envHit };
+    return { under: d.under, things, over: d.over + keyhole(out), key: keySvg, hit: window.cheatSheet.drawerHit(out, BOX), trayHit };
   }
 
-  window.mDrawer = { BOX, OPEN, KH, MX, TRAY, OLDKEY, ENV, PASSWORD, keyhole, holeLoop, oldKey, oldKeyShape, deskPose, lockPose, lockMaxA, drawer, envelope, envelopeLying, heldEnvelope, watch, gum, pen, glasses, trayFrame, WATCH, GUM, PEN, GLASSES, ENV_AT };
+  window.mDrawer = { BOX, OPEN, KH, MX, OLDKEY, ENV, PASSWORD, keyhole, holeLoop, oldKey, oldKeyShape, deskPose, lockPose, lockMaxA, drawer, envelope, heldEnvelope };
 })();
