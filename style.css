@@ -49,6 +49,9 @@ html, body {
 /* the scene runs below the frame to the desk's drawer (looking down shows it), and 240 either side */
 /* Caveat (SIL OFL 1.1, assets/fonts/Caveat-OFL.txt): what is written on the polaroids' strips */
 @font-face { font-family: 'Caveat'; src: url('assets/fonts/caveat-latin-400-normal.woff2') format('woff2'); font-display: block; }
+/* the old operators' own hands on their letters (SIL OFL 1.1, assets/fonts): jk's, Nothing You Could Do; aw's, Indie Flower */
+@font-face { font-family: 'Nothing You Could Do'; src: url('assets/fonts/nothing-you-could-do-latin-400-normal.woff2') format('woff2'); font-display: block; }
+@font-face { font-family: 'Indie Flower'; src: url('assets/fonts/indie-flower-latin-400-normal.woff2') format('woff2'); font-display: block; }
 
 #scene-holder {
   position: absolute;

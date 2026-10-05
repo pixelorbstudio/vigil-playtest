@@ -77,7 +77,7 @@
   // 1087.0..1123.4 across, the power knob's centre at y 709.3.
   const LED = { from: [229.97 + 176.27 * 980.06 / 981.85, 114.17 + 605.11 * 658.56 / 658.61], r: 7.55, to: [1027.2 - (1087.0 - 1064.5) - 7.55, 709.3] };
 
-  // ---- the knobs' engravings (proposed 2026-10-04, stills only: not drawn by the page until Arnold approves). Cut into the
+  // ---- the knobs' engravings (approved by Arnold 2026-10-04 from the stills; app.js draws them). Cut into the
   // chin the way the knobs' own pointers are drawn (their grey, #BDBDBB, 1.2 px, round ends): a power symbol by the power
   // knob, beside the LED; round the brightness knob a scale of short ticks between a moon at its low end and a sun at its high
   // end. Everything is laid out flat in the chin's plane, the clock plate's map carried on down the chin (the plate sits

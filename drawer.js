@@ -712,12 +712,15 @@
   // back to front: whose, how thick (back flap to front flap, in depth), which cut, how many sheets. A sheet or two
   // each: every edge in the stack stands 6 px or more from the next on screen, or two lines read as one doubled.
   const WHO = [['you', .007, 2, 1], ['m', .007, 0, 0], ['aw', .007, 1, 1], ['rd', .013, 0, 2], ['jk', .007, 1, 1], ['ts', .007, 0, 1]];
-  // (window.FILE_PAPERS, proposed 2026-10-04 for the old operators' letters, a stills page only until approved: each
-  // folder's sheets as the real papers in it: each its width in mm, or { w, at, sink } with at its centre's offset in px
-  // from the folder's middle, sink how far lower it stands (px), and down: true for one that sits too low in its folder
-  // to be seen (it keeps its place in the stack's spacing, and is not drawn), e.g. { ts: [{ w: 216, at: 4 }], jk: [152] };
-  // a folder not named keeps its sheets as they are)
-  const PAPERS_MM = window.FILE_PAPERS || null;
+  // The old operators' sheets are their letters (Arnold, 2026-10-04; letters.js): each folder's sheets as the real papers
+  // in it: each its width in mm, or { w, at, sink } with at its centre's offset in px from the folder's middle, sink how
+  // far lower it stands (px), and down: true for one that sits too low in its folder to be seen (it keeps its place in
+  // the stack's spacing, and is not drawn); a folder not named keeps its sheets as they are. Placed by
+  // `node audit-letters.js search`: every sheet's seen corners and ends 6 px or more from every seen line; ts's can't
+  // stand clear of the drawer's front anywhere, so it sits low, unseen; rd's second, blank sheet is gone.
+  // (window.FILE_PAPERS: a stills page or an audit may try another; {} is the folders as they were before the letters)
+  const LETTER_PAPERS = { ts: [{ w: 216, at: -16, down: true }], rd: [{ w: 216, at: 4 }], jk: [{ w: 152, at: -26 }], aw: [{ w: 140, at: -28 }] };
+  const PAPERS_MM = window.FILE_PAPERS !== undefined ? window.FILE_PAPERS : LETTER_PAPERS;
   // the folders' places, worked out once with the drawer fully out (they keep them while it moves)
   let STACK = null;
   function fileStack() {
@@ -770,7 +773,8 @@
 
   /* the file drawer, out by travel 0..1. lock: { key, turn } (the key in the lock, turned 0..1); photos: [{ photo,
      filed }] (loose on the folders, or standing in your folder); initials: on your tab (blank until something is
-     filed). Returns { opening, inner (clip to hole), outer, front, hole, hits: { front, loose, filed } }. */
+     filed); lifted: whose sheet is out of its folder (not drawn). Returns { opening, inner (clip to hole), outer, front,
+     hole, hits: { front, loose, filed, folders: [{ who, points }] } }. */
   let TAB_IDS = 0;
   function renderFile({ travel = 0, lock = {}, photos = [], initials = '', lifted = null } = {}) {
     const { x0, x1, y0, y1, rim, tops, wall, plate, depth } = FILE;
@@ -834,6 +838,15 @@
         const front = crest(null, tops + FL);
         across(f.fd, `<polygon points="${p3(at(f.fd, [...front, [xi1, tops + 80], [xi0, tops + 80]]))}" fill="#F2F2F0"/>` + line(at(f.fd, [...front, [xi1, tops + 80]])));
       });
+      // where each old operator's folder can be clicked (its things lifted out: letters.js): the band of it you see, from
+      // its back flap's edge, tab and all, down to the next folder's edge (the nearest, down to the drawer front's top)
+      hits.folders = [];
+      files.forEach((f0, i) => {
+        if (!['ts', 'jk', 'rd', 'aw'].includes(f0.who)) return;
+        const top = at(f0.fb + D, crest(cuts[f0.cut], tops)), next = files[i + 1];
+        const bottom = next ? at(next.fb + D, crest(cuts[next.cut], tops)) : at(dn, crest(null, rim));
+        hits.folders.push({ who: f0.who, points: p3([...top, ...bottom.reverse()]) });
+      });
       // a photo standing in a folder: x its centre, rise how far its top stands over the tabs' line, lean its tilt in its
       // own plane (radians); its lower part hidden by what is before it in the folder and the front flap, drawn after it
       function polaroidStanding({ x, d, rise, lean = 0, photo }) {
@@ -868,6 +881,29 @@
     // the opening in the pedestal, dark, square like the box coming out of it; only while it is out
     const opening = D > .001 ? `<polygon points="${pts(rect(x0, x1, y0, y1))}" fill="#D2D2D0" ${INK}/>` : '';
     return { opening, inner: inner.join(''), outer: outer.join(''), front, hole: pts(rect(x0, x1, y0, y1)), hits };
+  }
+  // what stands in front of a folder's sheets, on screen, with the drawer all the way out: its own front flap's edge,
+  // every nearer folder's back flap (tab and all) and front flap, and the drawer front's top. Each a polyline left to
+  // right, drawn exactly as renderFile draws them (a lifted letter shows only above them while it rises: letters.js).
+  function inFrontOf(who) {
+    const { x0, x1, rim, tops, wall, plate } = FILE, D = FILE.travel, xi0 = x0 + wall, xi1 = x1 - wall;
+    const { files, cuts } = fileStack(), i = files.findIndex(f => f.who === who);
+    const crest = (tx, y) => {
+      const p = [], run = (u0, u1, yy) => { const n = Math.max(1, Math.ceil((u1 - u0) / 2)); for (let k = p.length ? 1 : 0; k <= n; k++) p.push([u0 + (u1 - u0) * k / n, yy]); };
+      if (tx == null) { run(xi0, xi1, y); return p; }
+      run(xi0, tx, y);
+      for (const [a, u] of SHOULDER.slice(1)) p.push([tx + a, y - u]);
+      run(tx + TAB.shoulder, tx + TAB.w - TAB.shoulder, y - TAB.h);
+      for (const [a, u] of SHOULDER.slice().reverse().slice(1)) p.push([tx + TAB.w - a, y - u]);
+      run(tx + TAB.w, xi1, y);
+      return p;
+    };
+    const at = (d, ps) => ps.map(([x, y]) => F([x, y, d]));
+    const lines = [at(files[i].fd + D, crest(null, tops + FL))];
+    for (const f of files.slice(i + 1)) lines.push(at(f.fb + D, crest(cuts[f.cut], tops)), at(f.fd + D, crest(null, tops + FL)));
+    const front = []; for (let x = x0; x <= x1 + .01; x += 2) front.push([x, rim]);
+    lines.push(at(D - plate, front));
+    return lines;
   }
   /* a polaroid as a card in the camera, for when it moves (lifted out of the drawer, held up, filed): pose { c, A, B } in
      camera space, A along its width, B down it toward the strip, in polaroid millimetres; its picture faces -(A x B).
@@ -905,7 +941,7 @@
     if (photo.strip) svg += stripText(photo.strip, o(0, 44), o(1, 44), o(0, 45));
     return svg;
   }
-  window.deskDrawer = { LK, pullAt: pull, desk, render, P, F, slots: SLOTS, cartPose, slotPose, clearOfSlot, renderCartridge, renderCartridgeSolid, greyOf, proj, flight, renderFile, fileStack, lockKey, renderCard, photoPose, polaroidHeld, FILE, TRAVEL, LOCK, LOOSE, FILED, TAB, FL, toCamF, roomF };
+  window.deskDrawer = { LK, pullAt: pull, desk, render, P, F, slots: SLOTS, cartPose, slotPose, clearOfSlot, renderCartridge, renderCartridgeSolid, greyOf, proj, flight, renderFile, fileStack, inFrontOf, lockKey, renderCard, photoPose, polaroidHeld, FILE, TRAVEL, LOCK, LOOSE, FILED, TAB, FL, toCamF, roomF };
 
 
   // Motion, shared by the page and audit-drawer.js. A hand pull starts from rest and arrives at the slide's

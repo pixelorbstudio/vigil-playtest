@@ -450,6 +450,18 @@
   }
   drawClock();
   setInterval(drawClock, 250);
+  // The knobs' engravings (Arnold, 2026-10-04, from the stills; chin.js knobMarks): a power symbol in a row with the LED and
+  // the power knob; round the brightness knob a scale from 7:30 to 4:30 over the top, a moon at off and a sun at full as
+  // its two ends, each tick where the pointer points at its value. Cut into the chin as the pointers are drawn, under
+  // the knobs, and never in the way of a click.
+  {
+    const M = chin.knobMarks(), pts = ps => ps.map(p => p[0].toFixed(3) + ',' + p[1].toFixed(3)).join(' ');
+    const marksG = document.createElementNS(SVG, 'g');
+    marksG.id = 'knob-marks'; marksG.style.pointerEvents = 'none';
+    marksG.innerHTML = M.fills.map(f => `<polygon points="${pts(f)}" fill="${chin.MARKS.colour}"/>`).join('')
+      + M.strokes.map(s => `<polyline points="${pts(s)}" fill="none" stroke="${chin.MARKS.colour}" stroke-width="${chin.MARKS.width}" stroke-linecap="round" stroke-linejoin="round"/>`).join('');
+    chinPaths[13].before(marksG);
+  }
   // The hand brings it square to the slot with its back end level with the chin (k = from), pushes it in, and
   // it seats a touch proud of the chin (k = .012) with a small settle.
   function insertCart(from, label) {
@@ -727,6 +739,8 @@
   // vigil.file = { unlocked, filed }.
   // key: where M.'s key is: 'none' (still under Pong), 'desk', or 'lock' (and the drawer unlocked)
   const file = { travel: 0, open: false, busy: false, unlocked: false, filed: false, clicks: 0, key: 'none', turn: 1 };
+  // an old operator's things out of their folder (below, "the old operators' letters"): whose, which is in front
+  const letter = { who: null, busy: false, page: 0, photo: {} };
   try { Object.assign(file, JSON.parse(localStorage.getItem('vigil.file') || '{}')); } catch (e) {}
   if (file.key === 'coming') file.key = 'desk';          // (a page closed while the key was on its way to the desk)
   const keepFile = () => { try { localStorage.setItem('vigil.file', JSON.stringify({ unlocked: file.unlocked, filed: file.filed, key: file.key, filedShift: file.filedShift })); } catch (e) {} };
@@ -739,12 +753,14 @@
   const NIGHT1_PHOTO = { strip: '23:00' };
   const initialsOf = name => (name || '').trim().split(/\s+/).map(w => w[0] || '').join('').toLowerCase().slice(0, 3) || (account.user || '').slice(0, 2);
   function drawFile() {
-    const r = deskDrawer.renderFile({ travel: file.travel, lock: { key: file.unlocked, turn: file.unlocked ? file.turn : 0 },
+    const r = deskDrawer.renderFile({ travel: file.travel, lock: { key: file.unlocked, turn: file.unlocked ? file.turn : 0 }, lifted: letter.who,
       photos: file.unlocked && !file.lifted ? [{ photo: NIGHT1_PHOTO, filed: file.filed }] : [], initials: initialsShown() ? initialsOf(account.name) : '' });
     fileHoleClip.setAttribute('points', r.hole);
     fileOpening.innerHTML = r.opening; fileIn.innerHTML = r.inner; fileOut.innerHTML = r.outer;
     fileFront.innerHTML = r.front + `<polygon points="${r.hits.front}" fill="transparent"/>`;
-    fileHits.innerHTML = r.hits.loose ? `<polygon data-hit="loose" points="${r.hits.loose}" fill="transparent"/>` : r.hits.filed ? `<polygon data-hit="filed" points="${r.hits.filed}" fill="transparent"/>` : '';
+    // the old operators' folders first, the photo over them (it lies on them, or stands in your folder at the back)
+    fileHits.innerHTML = (file.open ? (r.hits.folders || []).map(h => `<polygon data-folder="${h.who}" points="${h.points}" fill="transparent"/>`).join('') : '')
+      + (r.hits.loose ? `<polygon data-hit="loose" points="${r.hits.loose}" fill="transparent"/>` : r.hits.filed ? `<polygon data-hit="filed" points="${r.hits.filed}" fill="transparent"/>` : '');
   }
   const fileTween = (ms, step) => new Promise(done => {
     const t0 = performance.now();
@@ -791,7 +807,7 @@
     if (file.busy) return;
     hint.classList.add('gone');
     if (!file.unlocked) { rattleFile(); return; }
-    if (held) return;
+    if (held || letter.who) return;
     file.open ? closeFile() : openFile();
   });
   setTimeout(drawFile);                               // (after the whole page is set up: your initials come from the login)
@@ -992,7 +1008,103 @@
     file.busy = false;
   }
   catcher.addEventListener('pointerdown', e => { e.preventDefault(); putPhotoDown(); });
-  fileHits.addEventListener('pointerdown', e => { if (!e.target.dataset?.hit) return; e.preventDefault(); liftPhoto(); });
+  fileHits.addEventListener('pointerdown', e => {
+    const folder = e.target.dataset?.folder;
+    if (folder) { e.preventDefault(); liftLetter(folder); return; }
+    if (!e.target.dataset?.hit || letter.who) return;
+    e.preventDefault(); liftPhoto();
+  });
+
+  // ---- the old operators' letters (Arnold, 2026-10-04; design.md, "The old operators' folders, decided"; letters.js draws
+  // the papers, traces.js the two photos). Clicking a folder lifts what is in it, the way the slips come: the letter rises
+  // straight up out of its folder (shown only above what is in front of it), then comes up to you as the polaroid does;
+  // in ts's and aw's, their polaroid comes with it, tucked behind it in the drawer and opening out behind the held letter,
+  // its top showing. Held, a click brings the next to the front (the one in front drops away below and comes up behind),
+  // and after the last a click puts them back the way they came; so do q and Backspace. jk's and rd's are letters alone.
+  for (const w of Object.keys(letters.PHOTO_OF)) traces.photo(w).then(p => { letter.photo[w] = p; });
+  for (const f of ['Nothing You Could Do', 'Indie Flower']) document.fonts.load(`20px '${f}'`).catch(() => {});   // (ready before a letter is held)
+  const letterCatcher = document.createElement('div');
+  letterCatcher.id = 'letter-catcher';
+  Object.assign(letterCatcher.style, { position: 'fixed', inset: '0', zIndex: '50', display: 'none', cursor: 'pointer' });
+  document.body.appendChild(letterCatcher);
+  const LETTER_MS = { rise: 420, fly: 700, next: 560, back: 320 };
+  const photoOf = who => letters.PHOTO_OF[who] ? letter.photo[who] : null;
+  // the letter (and its photo) while it rises in its folder: clipped to above what is in front of it, in the room's camera
+  function drawRising(who, rise) {
+    const env = letters.envelope(who), pose = letters.inFolder(who, rise), ph = photoOf(who);
+    keyLayer.innerHTML = `<clipPath id="letter-rise"><polygon points="${env.clip.map(p => p[0].toFixed(2) + ',' + p[1].toFixed(2)).join(' ')}"/></clipPath><g clip-path="url(#letter-rise)">`
+      + (ph ? deskDrawer.renderCard(letters.photoWith(who, pose, 0, look.rest), deskDrawer.roomF, ph).svg : '') + letters.paper(who, pose, deskDrawer.roomF).svg + '</g>';
+  }
+  // between the drawer and your hands: s 0 (just clear of the folders) to 1 (held)
+  const letterFlight = (who, s) => { const from = letters.inFolder(who, letters.clearRise(who)), to = letters.heldPose(look.rest); return between(from, to, s, v3.add(from.c, [0, -60, -20]), v3.add(to.c, [0, 30, 40])); };
+  function drawFlying(who, s) {
+    const pose = letterFlight(who, s), pr = roomOrFlat(s), ph = photoOf(who);
+    keyLayer.innerHTML = (ph ? deskDrawer.renderCard(letters.photoWith(who, pose, s, look.rest), pr, ph, 1 + .5 * s).svg : '') + letters.paper(who, pose, pr, 1 + .5 * s).svg;
+  }
+  // held: t from 0 (the letter in front, the photo behind it) to 1 (the photo in front); on the way the letter drops
+  // away below and comes back up behind it
+  function drawHeldLetter(who, t) {
+    const ph = photoOf(who), H = letters.heldPose(look.rest), pr = deskDrawer.proj;
+    if (!ph) { keyLayer.innerHTML = letters.paper(who, H, pr, 1.5).svg; return; }
+    const behind = letters.behindPose(look.rest, who), front = letters.photoFront(look.rest);
+    const low = { ...H, c: v3.add(H.c, [0, 340 * H.c[2] / 1500, 0]) };
+    const letterPose = t <= 0 || t >= 1 ? H : t < .5 ? between(H, low, t * 2) : between(low, H, t * 2 - 1);
+    const photoPose = t <= 0 ? behind : t >= 1 ? front : between(behind, front, t);
+    const L = letters.paper(who, letterPose, pr, 1.5).svg, P = deskDrawer.renderCard(photoPose, pr, ph, 1.5).svg;
+    keyLayer.innerHTML = t < .5 ? P + L : L + P;
+  }
+  async function liftLetter(who) {
+    if (!file.open || file.busy || held || letter.who || letter.busy) return;
+    if (letters.PHOTO_OF[who] && !letter.photo[who]) letter.photo[who] = await traces.photo(who);
+    letter.who = who; letter.busy = true; letter.page = 0;
+    playtest('file drawer: ' + who + "'s folder, lifted out");
+    mdSound('paper-slide');
+    drawFile();
+    keyDepth = DESK_FRONT_DEPTH;
+    const R = letters.clearRise(who);
+    await motion(LETTER_MS.rise, u => drawRising(who, R * (1 - Math.pow(1 - u, 2))));
+    await motion(LETTER_MS.fly, u => { const s = easeIO(u); keyDepth = DESK_FRONT_DEPTH + (.25 - DESK_FRONT_DEPTH) * s; drawFlying(who, s); });
+    keyDepth = .25;
+    drawHeldLetter(who, 0);
+    letterCatcher.style.display = '';
+    letter.busy = false;
+  }
+  async function nextLetterPage() {
+    letter.busy = true;
+    playtest('file drawer: ' + letter.who + "'s polaroid to the front");
+    mdSound('paper-flick');
+    await motion(LETTER_MS.next, u => drawHeldLetter(letter.who, easeIO(u)));
+    letter.page = 1; drawHeldLetter(letter.who, 1);
+    letter.busy = false;
+  }
+  async function putLetterBack() {
+    if (!letter.who || letter.busy) return;
+    const who = letter.who;
+    letter.busy = true; letterCatcher.style.display = 'none';
+    playtest('file drawer: ' + who + "'s things put back");
+    // the photo goes back behind the letter first, then they go down together the way they came
+    if (letter.page === 1) await motion(LETTER_MS.back, u => drawHeldLetter(who, 1 - easeIO(u)));
+    mdSound('paper-slide');
+    await motion(LETTER_MS.fly, u => { const s = easeIO(1 - u); keyDepth = DESK_FRONT_DEPTH + (.25 - DESK_FRONT_DEPTH) * s; drawFlying(who, s); });
+    keyDepth = DESK_FRONT_DEPTH;
+    const R = letters.clearRise(who);
+    await motion(LETTER_MS.rise, u => drawRising(who, R * (1 - u * u)));
+    keyLayer.innerHTML = '';
+    letter.who = null; letter.page = 0; drawFile();
+    letter.busy = false;
+  }
+  letterCatcher.addEventListener('pointerdown', e => {
+    e.preventDefault();
+    if (letter.busy) return;
+    if (photoOf(letter.who) && letter.page === 0) nextLetterPage(); else putLetterBack();
+  });
+  // q and Backspace put them back, as they close the tube's views; nothing is typed meanwhile (not under the Esc menu)
+  addEventListener('keydown', e => {
+    if (!letter.who || window.vigilTime?.paused) return;
+    if (e.key !== 'q' && e.key !== 'Q' && e.key !== 'Backspace') return;
+    e.preventDefault(); e.stopImmediatePropagation();
+    putLetterBack();
+  }, true);
 
   // ---- the cheat sheet (Eugene's playtest, 2026-10-02; sheet.js): the right pedestal's top drawer opens as the others
   // do, and in it lies a handwritten card: what the trouble means and its fix. Clicked, the card is lifted and held up
