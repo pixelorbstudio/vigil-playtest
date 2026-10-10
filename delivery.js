@@ -128,10 +128,56 @@
   const BASE_ROUND = r => Array.from({ length: 25 }, (_, k) => { const t = Math.PI / 2 * k / 24; return [3 - 3 * Math.cos(t), r - 3 + 3 * Math.sin(t), 'can']; });
   // seen small (in the drawer, about 0.7 px a mm): its bands flush, edged by a ring each, where the held one has them; the
   // lid shut (its seam, 8 mm from the band's ring, would stand under 6 px from it, so it is left out small)
-  function farProfile() {
+  function farProfile(aw = false) {
     const { L, r } = CAN, seat = L - 18;
     const lidEnd = Array.from({ length: 25 }, (_, k) => { const t = Math.PI / 2 * k / 24; return [L - 5 + 5 * Math.sin(t), r - 5 + 5 * Math.cos(t), 'round']; });
-    return [[0, 0, 'can'], ...BASE_ROUND(r), [18, r, 'band'], [32, r, 'can'], [seat - 22, r, 'band'], [seat - 8, r, 'can'], ...lidEnd, [L, 0]];
+    return [[0, 0, 'can'], ...BASE_ROUND(r), [18, r, 'band'], [32, r, 'can'], ...tagRun(aw), [seat - 22, r, 'band'], [seat - 8, r, 'can'], ...lidEnd, [L, 0]];
+  }
+  /* ---- aw's canister (night 3, in the blackout): a paper tag wrapped round it between the bands, flush (as the felt bands
+     are: drawn proud, its edges stood a pixel off the canister's outline), edged by a ring each side, "aw" written on it in
+     Caveat, the hand the polaroids' strips are in. 40 mm of the 78 between the bands: in the receiver (0.43 px a mm) each
+     of its rings stands 6 px or more from a band's and from the window's sill. The writing goes round the canister, so it
+     reads standing in the receiver (sideways held across in front of you, as a label does), at the angle that faces you
+     there and held (post.js turns the canister in the receiver to match). */
+  const TAG = { h0: 56, h1: 96, font: 32, tone: ['#FAFAF9', '#EEEEEC'] };
+  // the tag's points in a profile, between the bands (none if it isn't aw's)
+  function tagRun(aw) { return aw ? [[TAG.h0, CAN.r, 'tag'], [TAG.h1, CAN.r, 'can']] : []; }
+  // the angle round the canister (U cos a + V sin a) that faces you held: the tag's writing is centred there
+  function tagAngle() {
+    const P = heldPose(0), e = V3.unit(V3.mul(P.C, -1));
+    return Math.atan2(V3.dot(e, V3.unit(P.V)), V3.dot(e, V3.unit(P.U)));
+  }
+  // Caveat's "a" and "w" (measured at 100 px: advances 43.7 and 51.7, kerned 1 closer; ink 7..50 and 12..59; x-height 38)
+  const AW_GLYPHS = [{ g: 'a', x: 0, ink: [7, 50] }, { g: 'w', x: 42.7, ink: [12, 59] }], AW_INK = [7, 101.7], AW_XH = 38;
+  // the writing, glyph by glyph: each glyph placed by the surface's own frame at its middle (a glyph is 15 mm across, 15
+  // degrees either side: under 0.1 mm off the curve at its ends), clipped to the tag's side facing you
+  function tagWriting(pose, project, clipPts) {
+    const { r } = CAN, { C, A, U, V } = pose, k = TAG.font / 100, hc = (TAG.h0 + TAG.h1) / 2, base = hc - AW_XH * k / 2;
+    const at = (a, h) => V3.add(V3.add(V3.add(C, V3.mul(A, h)), V3.mul(U, r * Math.cos(a))), V3.mul(V, r * Math.sin(a)));
+    const a0 = tagAngle(), mid = (AW_INK[0] + AW_INK[1]) / 2;
+    // which way round reads left to right from outside (x across, y down the canister toward its base, the eye outside)
+    const n0 = V3.add(V3.mul(U, Math.cos(a0)), V3.mul(V, Math.sin(a0))), t0 = V3.add(V3.mul(U, -Math.sin(a0)), V3.mul(V, Math.cos(a0)));
+    const dir = V3.dot(V3.cross(t0, V3.mul(A, -1)), n0) < 0 ? 1 : -1;
+    let svg = '';
+    for (const G of AW_GLYPHS) {
+      const cx = (G.x + (G.ink[0] + G.ink[1]) / 2 - mid) * k, a = a0 + dir * cx / r;
+      const P = at(a, base), facing = V3.dot(V3.unit(V3.add(V3.mul(U, Math.cos(a)), V3.mul(V, Math.sin(a)))), V3.unit(V3.mul(P, -1)));
+      if (facing < .2) continue;                         // (turned too far from you to read: hidden behind the clip anyway)
+      const o = project(P), d = .01, ex = project(at(a + dir * d / r, base)), ey = project(at(a, base - d));
+      const m = [(ex[0] - o[0]) / d, (ex[1] - o[1]) / d, (ey[0] - o[0]) / d, (ey[1] - o[1]) / d, o[0], o[1]].map(v => v.toFixed(4)).join(' ');
+      svg += `<text transform="matrix(${m})" x="${((G.x - mid) * k - cx).toFixed(3)}" y="0" font-family="Caveat, cursive" font-size="${TAG.font}" fill="#6E6E6C">${G.g}</text>`;
+    }
+    if (!svg) return '';
+    const id = 'awtag' + (++CLIP_IDS);
+    return `<clipPath id="${id}"><polygon points="${fmt(clipPts)}"/></clipPath><g clip-path="url(#${id})">${svg}</g>`;
+  }
+  // the tag's side facing you, as a polygon (its two rings between the canister's silhouettes there)
+  function tagFace(pose, project) {
+    const { r } = CAN, { C, A, U, V } = pose, at = (a, h) => V3.add(V3.add(V3.add(C, V3.mul(A, h)), V3.mul(U, r * Math.cos(a))), V3.mul(V, r * Math.sin(a)));
+    const side = h => { const out = []; for (let i = 0; i < 1440; i++) { const a = 2 * Math.PI * i / 1440, P = at(a, h), n = V3.add(V3.mul(U, Math.cos(a)), V3.mul(V, Math.sin(a))); if (V3.dot(n, V3.mul(P, -1)) > 0) out.push({ a, p: project(P) }); } return out; };
+    // the facing run as one arc (it may wrap past 0)
+    const run = h => { const s = side(h); if (!s.length) return []; let cut = s.findIndex((q, i) => i && q.a - s[i - 1].a > .01); return (cut > 0 ? [...s.slice(cut), ...s.slice(0, cut)] : s).map(q => q.p); };
+    return [...run(TAG.h0), ...run(TAG.h1).reverse()];
   }
   // in the drawer: across the back, against the right wall, its lid end toward the frame; the drawer's own depth moves it
   // (at OPEN it lies .035 out of the pedestal; a little further left and its far end showed as a sliver over the wall)
@@ -147,10 +193,11 @@
   // Fills first, then every line over them, as the held lid is drawn (its rounded edge is many narrow bands, and band by
   // band each fill covered half the outline of the one before, which put a step in the end's outline); the canister is
   // convex, so nothing seen lies in front of anything else seen.
-  function far(pose, project) {
+  function far(pose, project, { aw = false } = {}) {
     const Au = V3.unit(pose.A), round = n => { const d = V3.dot(n, Au), m = V3.unit(V3.add(n, V3.mul(Au, -d))); return V3.dot(m, window.solid.L) > .15 ? LM.can[0] : LM.can[1]; };
-    const all = window.lathe.compose(window.lathe.lathe(farProfile(), pose, project, { ...LM, round }, { sectors: 720, matEdges: ['band'], split: false, seal: true }));
-    return all.replace(/<path [^>]*\/>/g, '') + [...all.matchAll(/<path [^>]*\/>/g)].map(m => m[0]).join('');
+    const all = window.lathe.compose(window.lathe.lathe(farProfile(aw), pose, project, { ...LM, round, tag: TAG.tone }, { sectors: 720, matEdges: ['band', 'tag'], split: false, seal: true }));
+    // (aw's writing over the fills, under the lines)
+    return all.replace(/<path [^>]*\/>/g, '') + (aw ? tagWriting(pose, project, tagFace(pose, project)) : '') + [...all.matchAll(/<path [^>]*\/>/g)].map(m => m[0]).join('');
   }
   // held across in front of you, its open end turned toward you and a little down, the hinge on top. One true size: the
   // camera brings it close (as near as the stills held it 1.7 times its size, so the same on screen). rest: where you
@@ -166,15 +213,15 @@
   const LID_ROUND = r => Array.from({ length: 25 }, (_, k) => { const t = Math.PI / 2 * k / 24; return [13 + 5 * Math.sin(t), r - 5 + 5 * Math.cos(t), 'round']; });
   let CLIP_IDS = 0;
   /* held up: what is 'slip' (rolled in its mouth) or 'empty'; lid: how far open (radians; 125 degrees, sprung open) */
-  function held(what, pose, project, lid = 0) {
+  function held(what, pose, project, lid = 0, { aw = false } = {}) {
     const L = window.lathe, { r } = CAN, { C, A, U, V } = pose, Uu = V3.unit(U);
     const at = (h, u, v) => V3.add(V3.add(V3.add(C, V3.mul(A, h)), V3.mul(U, u)), V3.mul(V, v));
     const seat = SEAT;
     // the felt bands flush, edged by a ring each, as in the drawer (Arnold, 2026-10-03: they stood 4 mm proud here and
     // flush there, so its outline jumped 11 px where the flight swaps one drawing for the other)
-    const body = [[0, 0, 'can'], ...BASE_ROUND(r), [18, r, 'band'], [32, r, 'can'],
+    const body = [[0, 0, 'can'], ...BASE_ROUND(r), [18, r, 'band'], [32, r, 'can'], ...tagRun(aw),
       [seat - 22, r, 'band'], [seat - 8, r, 'can'], [seat, r, 'rim'], [seat, r - WALL, 'inside'], [10, r - WALL, 'inside'], [10, 0]];
-    const mats = { ...LM, rim: LM.can };
+    const mats = { ...LM, rim: LM.can, tag: TAG.tone };
     const items = L.lathe(body, { C, A, U, V }, project, mats, { sectors: 720, noGenerators: ['inside'], split: false, seal: true, matEdges: true });
     // the lid, hinged at the back of the rim
     const hinge = at(seat, 0, r), ax = Uu, Au = V3.unit(A);
@@ -207,7 +254,7 @@
     }
     const lidIn = sort(lidItems.filter(x => x.mat === 'inside')), lidOut = sort(lidItems.filter(x => x.mat !== 'inside'));
     const lidSvg = lidIn + lidOut.replace(/<path [^>]*\/>/g, '') + [...lidOut.matchAll(/<path [^>]*\/>/g)].map(m => m[0]).join('');
-    const bodySvg = sort(inside) + inTube + sort(walls) + sort(rim) + outOfIt;
+    const bodySvg = sort(inside) + inTube + sort(walls) + (aw ? tagWriting(pose, project, tagFace(pose, project)) : '') + sort(rim) + outOfIt;
     return lid > Math.PI / 3 ? lidSvg + bodySvg : bodySvg + lidSvg;
   }
   // the slip, rolled to 22 mm across, its top 40 mm out of the mouth, a little below the axis (lying on the bottom, its
@@ -248,7 +295,7 @@
   // grey between the print and the rules); a misrouted memo ('memo') and a timesheet ('timesheet'), papers of their own
   // that come with a slip and are held up behind it, the timesheet clipped to it.
   const CARBON = ['REQUEST: 1 BAG · REASON: can\'t stay awake', 'TO: m · 2019-04-01'];
-  function slip(kind, { note = [], to = '', aw = false, no = 412, struck = false, carbon = false } = {}, place = { cx: 720, cy: 470, k: 1 }) {
+  function slip(kind, { note = [], to = '', aw = false, no = 412, struck = false, carbon = false, date = '' } = {}, place = { cx: 720, cy: 470, k: 1 }) {
     const { w, h } = SLIP, a = (place.rot ?? SLIP.rot) * Math.PI / 180, c = Math.cos(a) * place.k, si = Math.sin(a) * place.k;
     const P2 = (x, y) => [place.cx + (x - w / 2) * c - (y - h / 2) * si, place.cy + (x - w / 2) * si + (y - h / 2) * c];
     const m = [c, si, -si, c, ...P2(0, 0)].map(v => v.toFixed(4)).join(' ');
@@ -264,12 +311,24 @@
       inner += text(28, 66, 'ISSUE SLIP · STORES', `font-size="12" letter-spacing="1.5" fill="${GREY}"`);
       inner += text(w - 28, 66, 'No. ' + String(no).padStart(4, '0'), `font-size="12" letter-spacing="1" fill="${GREY}" text-anchor="end"`);
       inner += rule(84);
-      inner += text(28, 150, 'ISSUED: 1 BAG · NIGHT SHIFT BLEND', `font-size="22" letter-spacing=".5" fill="${TYPE}"`);
+      // (beans for a pot, not a bag: no bag ever comes; the story audit, 2026-10-06. Draft words)
+      inner += text(28, 150, 'ISSUED: BEANS · 1 POT · NIGHT BLEND', `font-size="22" letter-spacing=".5" fill="${TYPE}"`);
       inner += rule(210);
       inner += text(28, 246, 'TO', `font-size="11" letter-spacing="1.5" fill="${GREY}"`);
       // struck: the old name typed over with X's, the new one after it
       inner += struck ? text(70, 246, 'aw', `font-size="14" fill="${TYPE}"`) + text(71, 249, 'XX', `font-size="14" fill="${GREY}"`) + text(104, 246, to, `font-size="14" fill="${TYPE}"`)   // (the X's a little lower and a shade lighter, a second pass of a tired ribbon: aw stays readable under them)
         : text(70, 246, to, `font-size="14" fill="${TYPE}"`);
+    } else if (kind === 'award') {
+      // 04:44's canister (night 1; nobody sent it): the company's commendation, your name and tomorrow's date (draft words
+      // but its title, Arnold's: OPERATOR OF THE NIGHT)
+      inner += text(w - 28, 42, 'SITE 4', `font-weight="600" font-size="13" letter-spacing="2" fill="${GREY}" text-anchor="end"`);
+      inner += text(28, 66, 'PEOPLE · COMMENDATION', `font-size="12" letter-spacing="1.5" fill="${GREY}"`);
+      inner += rule(84);
+      inner += text(w / 2, 136, 'OPERATOR OF THE NIGHT', `font-size="27" letter-spacing="2" fill="${TYPE}" text-anchor="middle"`);
+      inner += text(w / 2, 182, to, `font-size="20" letter-spacing=".5" fill="${TYPE}" text-anchor="middle"`);
+      inner += text(w / 2, 212, date, `font-size="14" letter-spacing="1" fill="${GREY}" text-anchor="middle"`);
+      inner += rule(236);
+      inner += text(w / 2, 268, 'Someone is always awake.', `font-size="12" letter-spacing=".5" fill="${GREY}" text-anchor="middle"`);
     } else if (kind === 'memo') {
       inner += text(w - 28, 42, 'MEMO', `font-weight="600" font-size="13" letter-spacing="2" fill="${GREY}" text-anchor="end"`);
       inner += text(28, 66, 'INTEROFFICE · SITE 4', `font-size="12" letter-spacing="1.5" fill="${GREY}"`);
@@ -280,7 +339,8 @@
       inner += text(28, 66, 'TIMESHEET · NIGHTS', `font-size="12" letter-spacing="1.5" fill="${GREY}"`);
       inner += rule(84);
       inner += text(28, 142, 'HOURS THIS SHIFT: 6.5', `font-size="20" letter-spacing=".5" fill="${TYPE}"`);
-      inner += text(28, 190, 'HOURS ON RECORD: 11,408', `font-size="20" letter-spacing=".5" fill="${TYPE}"`);
+      // (11,408 counts nights, not hours: the story audit, 2026-10-06)
+      inner += text(28, 190, 'SHIFTS ON RECORD: 11,408', `font-size="20" letter-spacing=".5" fill="${TYPE}"`);
       inner += rule(230);
     } else {
       inner += text(w - 28, 42, 'INTEROFFICE', `font-weight="600" font-size="13" letter-spacing="2" fill="${GREY}" text-anchor="end"`);
@@ -303,5 +363,5 @@
     return `<g transform="matrix(${m})"><path d="${d}" fill="none" stroke="#B4B4B4" stroke-linecap="round" stroke-linejoin="round" vector-effect="non-scaling-stroke"/></g>`;
   }
 
-  window.delivery = { DLV, NUDGE, OPEN, CAN, PIPE, LABEL, FLAG, drawer, drawerHit, drawerPose, far, heldPose, held, rollTip, slip, clip, pipe, label, flag, MM };
+  window.delivery = { DLV, NUDGE, OPEN, CAN, PIPE, LABEL, FLAG, TAG, tagAngle, drawer, drawerHit, drawerPose, far, heldPose, held, rollTip, slip, clip, pipe, label, flag, MM };
 })();

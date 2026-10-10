@@ -773,10 +773,11 @@
 
   /* the file drawer, out by travel 0..1. lock: { key, turn } (the key in the lock, turned 0..1); photos: [{ photo,
      filed }] (loose on the folders, or standing in your folder); initials: on your tab (blank until something is
-     filed); lifted: whose sheet is out of its folder (not drawn). Returns { opening, inner (clip to hole), outer, front,
+     filed); lifted: whose sheet is out of its folder (not drawn); yours: your folder can be clicked too (something is filed
+     in it out of sight: the award slip). Returns { opening, inner (clip to hole), outer, front,
      hole, hits: { front, loose, filed, folders: [{ who, points }] } }. */
   let TAB_IDS = 0;
-  function renderFile({ travel = 0, lock = {}, photos = [], initials = '', lifted = null } = {}) {
+  function renderFile({ travel = 0, lock = {}, photos = [], initials = '', lifted = null, yours = false } = {}) {
     const { x0, x1, y0, y1, rim, tops, wall, plate, depth } = FILE;
     const D = FILE.travel * travel, back = D - depth, dn = D - plate, xi0 = x0 + wall, xi1 = x1 - wall;
     const inner = [], outer = [], hits = {};
@@ -842,7 +843,7 @@
       // its back flap's edge, tab and all, down to the next folder's edge (the nearest, down to the drawer front's top)
       hits.folders = [];
       files.forEach((f0, i) => {
-        if (!['ts', 'jk', 'rd', 'aw'].includes(f0.who)) return;
+        if (!['ts', 'jk', 'rd', 'aw'].includes(f0.who) && !(yours && f0.who === 'you')) return;
         const top = at(f0.fb + D, crest(cuts[f0.cut], tops)), next = files[i + 1];
         const bottom = next ? at(next.fb + D, crest(cuts[next.cut], tops)) : at(dn, crest(null, rim));
         hits.folders.push({ who: f0.who, points: p3([...top, ...bottom.reverse()]) });

@@ -12,7 +12,8 @@
   const fmt = ps => ps.map(q => q[0].toFixed(2) + ',' + q[1].toFixed(2)).join(' ');
   const AT = [790, 58];                                   // a point in the cell
   const STEP = .2;
-  function build(paths) {
+  // (at: a point in another cell, for the stills of the ceiling seen looking up; the page's cell by default)
+  function build(paths, AT = window.ceilingTile.AT) {
     // coarse polylines (every 2 px) to find the cell and its corners
     const coarse = paths.map(p => { const n = Math.ceil(p.len / 2); return Array.from({ length: n + 1 }, (_, i) => ({ q: p.at(p.len * i / n), l: p.len * i / n })); });
     const radialOf = c => Math.abs(c[c.length - 1].q[1] - c[0].q[1]) > Math.abs(c[c.length - 1].q[0] - c[0].q[0]);

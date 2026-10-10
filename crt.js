@@ -71,7 +71,7 @@
         }
       });
       f.globalAlpha = 1;
-      if (view.field) drawField(view.field, pal);
+      if (view.field) view.field.pong ? drawPong(view.field, pal) : drawField(view.field, pal);
       if (view.cursor && view.cursorOn) {
         const x = PAD_X + view.cursor.col * CW, y = TOP + view.cursor.row * LH + LH / 2;
         f.shadowColor = pal.glow; f.shadowBlur = 6 * K; f.fillStyle = pal.text;
@@ -104,14 +104,22 @@
       let x = PAD_X;
       const put = (t, color) => { f.fillStyle = color; f.fillText(t, x, y); x += f.measureText(t).width; };
       if (!list.length) put('all units nominal', pal.dim);
+      // a rack dropping packets says what is wrong and what fixes it, in a few words (Eugene's second playtest, 2026-10-05:
+      // LOSS alone left him stuck); short if the strip would run past the tube's edge
+      const hint = (p, long) => p.kind === 'LOSS' && !p.fixing ? (long ? `  dropping packets: ROUTE cart, route ${p.unit}` : `  route ${p.unit}`) : '';
+      const width = long => list.reduce((s, p, i) => s + f.measureText((i ? '  ·  ' : '') + p.unit + ' ' + (p.fixing ? 'FIXING' : p.kind) + hint(p, long)).width, 0);
+      const long = width(true) <= W - 2 * PAD_X;
       list.forEach((p, i) => {
         if (i) put('  ·  ', pal.dim);
         put(p.unit + ' ', p.fixing ? pal.dim : pal.text);
         const st = CLS[{ DOWN: 'pdown', HOT: 'phot', STUCK: 'pstuck', LOSS: 'ploss' }[p.kind]] || {};
         if (p.fixing) put('FIXING', pal.dim); else { f.shadowColor = st.glow || pal.glow; put(p.kind, st.color || pal.text); f.shadowColor = pal.glow; }
+        if (hint(p, long)) put(hint(p, long), pal.dim);
       });
     }
-    function drawStatus({ energy, beans, low, strikes = 0, mail = null, beansLit = false, problems = null }, pal) {
+    // spurts: energy that just moved, [{ a, b, age }] (from a to b, age 0..1): drawn over the gauge where it moved, green
+    // in, red out (the tube's ok green and the supervisor's red, the only colours it has besides the phosphor)
+    function drawStatus({ energy, beans, low, strikes = 0, mail = null, beansLit = false, problems = null, spurts = [] }, pal) {
       if (problems) drawProblems(problems, pal);
       const SF = 15, y = 22;                            // font size and the line's centre, in design units
       f.font = `${SF}px ${FAMILY}`;
@@ -140,7 +148,7 @@
         f.beginPath(); f.moveTo(x + 1.5, top + 1); f.lineTo(x + ENV / 2, top + h * .58); f.lineTo(x + ENV - 1.5, top + 1); f.stroke();
         f.restore();
         if (mcount) { f.fillStyle = pal.text; f.fillText(mcount, x + ENV + 5, y); }
-        mailHit = { x0: x - 6, x1: x + MS - GAP * 3 + 6, y0: gy - 9, y1: gy + ch + 9 };
+        mailHit = { x0: x - 10, x1: x + MS - GAP * 3 + 10, y0: gy - 10, y1: gy + ch + 10 };
         x += MS;
       }
       // strikes: an X each, drawn in the supervisor's red (the only other red on the tube is theirs)
@@ -155,10 +163,21 @@
         x += XS;
       }
       f.fillStyle = pal.dim; f.fillText(label, x, y); x += w(label) + GAP;
-      // the gauge: full cells solid, empty cells a light shade of the same ink, square, joined, on the grid
-      const full = Math.round(energy * CELLS); x = snap(x);
-      f.fillStyle = ink; f.fillRect(x, gy, full * cw, ch);
-      f.globalAlpha = .28; f.fillRect(x + full * cw, gy, (CELLS - full) * cw, ch); f.globalAlpha = 1;
+      // the gauge: the full part solid, the rest a light shade of the same ink, as tall as the capitals. It fills to the
+      // energy itself, not to whole cells, so it visibly ticks down (Arnold, 2026-10-05: twelve cells moved once in 8%)
+      x = snap(x);
+      const fillW = snap(Math.max(0, Math.min(1, energy)) * GAUGE);
+      f.fillStyle = ink; f.fillRect(x, gy, fillW, ch);
+      f.globalAlpha = .28; f.fillRect(x + fillW, gy, GAUGE - fillW, ch); f.globalAlpha = 1;
+      // the spurts: bright at once, then fading, over the stretch of the bar that moved (at least a pixel and a half)
+      for (const s of spurts) {
+        const lo = Math.max(0, Math.min(s.a, s.b)), hi = Math.min(1, Math.max(s.a, s.b)), gain = s.b > s.a;
+        let x0 = x + lo * GAUGE, x1 = x + hi * GAUGE;
+        if (x1 - x0 < 1.5) { const m = (x0 + x1) / 2; x0 = m - .75; x1 = m + .75; }
+        f.save(); f.globalAlpha = Math.max(0, 1 - s.age * s.age);
+        f.fillStyle = gain ? '#b8f0c2' : '#ffb4b4'; f.shadowColor = gain ? '#b8f0c2' : '#ff7a7a'; f.shadowBlur = 8 * K;
+        f.fillRect(x0, gy - 1, x1 - x0, ch + 2); f.restore();
+      }
       x += GAUGE + GAP;
       f.fillStyle = low ? ink : pal.dim; f.fillText(pct, x, y); x += w(pct) + GAP * 2;
       // the bean, in the phosphor, its crease cut out so the glass shows through; as tall as the capitals, on them
@@ -201,6 +220,16 @@
       }
       f.globalAlpha = 1;
     }
+    // Pong's ball and paddles, drawn where they are rather than on the text grid, so they move smoothly (Arnold,
+    // 2026-10-05: on the grid the ball jumped a cell at a time): fd { pong: true, col, row (the court's top left text
+    // cell), ball: [x, y] | null, paddles: [[x, y, len]] }, in cells, fractions allowed. A paddle is a text cell wide, as
+    // the block it was; the ball the size of the round glyph it was.
+    function drawPong(fd, pal) {
+      const x0 = PAD_X + fd.col * CW, y0 = TOP + fd.row * LH;
+      f.shadowColor = pal.glow; f.shadowBlur = 6 * K; f.fillStyle = pal.text;
+      for (const [x, y, len] of fd.paddles) f.fillRect(x0 + x * CW + 1, y0 + y * LH + 2, CW - 2, len * LH - 4);
+      if (fd.ball) { f.beginPath(); f.arc(x0 + (fd.ball[0] + .5) * CW, y0 + (fd.ball[1] + .5) * LH, FONT * .3, 0, Math.PI * 2); f.fill(); }
+    }
     // the barrel: columns to the curved top and bottom, then rows to the curved sides (canvas pixels)
     function bend() {
       m.clearRect(0, 0, mid.width, mid.height);
@@ -208,6 +237,6 @@
       out.clearRect(0, 0, canvas.width, canvas.height);
       for (let y = 0; y < mid.height; y++) out.drawImage(mid, 0, y, mid.width, 1, warp.left[y], y, mid.width + warp.right[y] - warp.left[y], 1);
     }
-    return { paint, COLS, ROWS, CW, LH, mailHit: () => mailHit };
+    return { paint, COLS, ROWS, CW, LH, TOP, PAD_X, mailHit: () => mailHit };
   };
 })();

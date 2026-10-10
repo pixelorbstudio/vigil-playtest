@@ -207,6 +207,8 @@ html, body {
   animation: hint-pulse 1.6s ease-in-out infinite;
 }
 #hint.gone { opacity: 0; animation: none; }
+#build-note { position: fixed; z-index: 3; left: 16px; bottom: 14px; margin: 0; font-size: 12px; letter-spacing: .04em; color: #7a7a7a; }
+#build-note[hidden] { display: none; }
 @keyframes hint-pulse { 50% { opacity: .35; } }
 
 #mug { cursor: pointer; transform-box: view-box; transform-origin: 1298.5px 837px; will-change: transform, opacity; }
@@ -233,6 +235,9 @@ html, body {
 @media (prefers-reduced-motion: reduce) {
   .led, .wisp, #term-tube, #hint, .power-led { animation: none !important; }
   .layer { transition: none; }
+  /* the steam still shows, standing still, as much as the coffee is hot (the story audit, 2026-10-06: with its animation
+     off, a wisp stayed at its first keyframe's opacity, 0, and the mug never steamed) */
+  .wisp { opacity: calc(.3 * var(--steam, 1)); }
 }
 
 .glare { mix-blend-mode: screen; pointer-events: none; }
@@ -364,3 +369,11 @@ body.sipping #terminal { filter: blur(1.4px); }
 /* the whole page goes dark with the room, not just the frame */
 body.lost { background: #040406 !important; transition: background 1.8s ease-in; }
 body.lost > :not(#stage) { opacity: .15; transition: opacity 1.8s ease-in; }
+
+/* 04:44 (design.md section 5, night 1's climax): the room stops. The steam holds where it is, mid-rise, until it goes on. */
+#steam.still .wisp { animation-play-state: paused !important; }
+
+/* the blink (design.md section 5, the end of a clocked-out night 1; Arnold, Q12): the room is not drawn for a beat, black
+   behind it so the page's near-white never shows; no filter, no fade */
+body.blink { background: #000 !important; transition: none !important; }
+body.blink #look, body.blink #hud, body.blink #build-note { visibility: hidden !important; }
