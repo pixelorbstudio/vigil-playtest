@@ -9,13 +9,27 @@
    ceiling, the ceiling's camera draws the ring it goes through, fitted to the tube's own silhouette there. */
 (function () {
   // ---- the lens, from the drawing: the rack's two front edges, and the desk's back edge (stage coordinates)
+  // A path's length and points through pathlen.js where the page has it (the browser measures the whole path again on every
+  // getPointAtLength: these samplings were 1.2 s of the page's load; the final sweep's live audit, 2026-10-11), else the
+  // browser's own; and the path's matrix to the stage, applied by hand
+  const measure = p => {
+    if (window.pathLength) try { const m = window.pathLength(p); return { L: m.length, at: m.at }; } catch (e) {}
+    const L = p.getTotalLength(); return { L, at: t => { const q = p.getPointAtLength(t); return [q.x, q.y]; } };
+  };
+  const toStage = (svg, p) => { const M = svg.getScreenCTM().inverse().multiply(p.getScreenCTM()); return ([x, y]) => [M.a * x + M.c * y + M.e, M.b * x + M.d * y + M.f]; };
   function edgeRun(svg, group, top, bot) {
-    const inv = svg.getScreenCTM().inverse();
     let best = null;
+    // (a path whose box never comes within the band's reach of the chord has no point near it: skipped unsampled)
+    const chordX = y => top[0] + (bot[0] - top[0]) * (y - top[1]) / (bot[1] - top[1]);
     for (const p of svg.querySelector('#' + group).querySelectorAll('path')) {
-      const L = p.getTotalLength(); if (L < 300) continue;
-      const m = p.getScreenCTM(), n = Math.ceil(L / 1.5), pts = [];
-      for (let i = 0; i <= n; i++) { const q = p.getPointAtLength(L * i / n), s = new DOMPoint(q.x, q.y).matrixTransform(m).matrixTransform(inv); pts.push([s.x, s.y]); }
+      const st = toStage(svg, p), b = p.getBBox(), c = [[b.x, b.y], [b.x + b.width, b.y], [b.x, b.y + b.height], [b.x + b.width, b.y + b.height]].map(st);
+      const by0 = Math.max(Math.min(...c.map(q => q[1])), top[1] - 2), by1 = Math.min(Math.max(...c.map(q => q[1])), bot[1] + 2);
+      if (by1 < by0) continue;
+      const bx0 = Math.min(...c.map(q => q[0])), bx1 = Math.max(...c.map(q => q[0])), cx0 = Math.min(chordX(by0), chordX(by1)) - 40, cx1 = Math.max(chordX(by0), chordX(by1)) + 40;
+      if (bx1 < cx0 || bx0 > cx1) continue;
+      const { L, at } = measure(p); if (L < 300) continue;
+      const n = Math.ceil(L / 1.5), pts = [];
+      for (let i = 0; i <= n; i++) pts.push(st(at(L * i / n)));
       const near = pts.filter(([x, y]) => { if (y < top[1] - 2 || y > bot[1] + 2) return false; const t = (y - top[1]) / (bot[1] - top[1]), cx = top[0] + (bot[0] - top[0]) * t; return Math.abs(x - cx) < 40; });
       if (near.length > 200 && (!best || near.length > best.length)) best = near;
     }
@@ -50,8 +64,8 @@
     // the desk's back edge (the desk's first path, its fill: Vector_1616 in the 1920 frame, Vector_3675 in the 2560, the same
     // curve to 0.01 px), its lowest point every 4 px across: a curve y(x) in even powers, fitted over the 1920 frame's width
     // as it always was (so the tube stands where it stood)
-    const inv = svg.getScreenCTM().inverse(), p = svg.querySelector('#desk path'), m = p.getScreenCTM(), L = p.getTotalLength(), bins = {};
-    for (let i = 0; i <= 6000; i++) { const q = p.getPointAtLength(L * i / 6000), s = new DOMPoint(q.x, q.y).matrixTransform(m).matrixTransform(inv); if (s.y > 880) continue; const k = Math.round(s.x / 4); if (!(k in bins) || s.y > bins[k]) bins[k] = s.y; }
+    const p = svg.querySelector('#desk path'), st = toStage(svg, p), { L, at } = measure(p), bins = {};
+    for (let i = 0; i <= 6000; i++) { const [sx, sy] = st(at(L * i / 6000)), s = { x: sx, y: sy }; if (s.y > 880) continue; const k = Math.round(s.x / 4); if (!(k in bins) || s.y > bins[k]) bins[k] = s.y; }
     const pts = Object.keys(bins).map(Number).sort((a, b) => a - b).map(k => [k * 4, bins[k]]).filter(([x]) => x > -300 && x < 1740);
     const M = Array.from({ length: 4 }, () => new Array(5).fill(0));
     for (const [x, y] of pts) { const u = (x - 720) / 700, v = [1, u * u, u ** 4, u ** 6]; for (let i = 0; i < 4; i++) { for (let j = 0; j < 4; j++) M[i][j] += v[i] * v[j]; M[i][4] += v[i] * y; } }

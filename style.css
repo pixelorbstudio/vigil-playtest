@@ -52,13 +52,13 @@ html.bars, html.bars body { background: var(--bars); }
 
 /* the scene runs below the frame to the desk's drawer (looking down shows it), and 560 either side */
 /* Caveat (SIL OFL 1.1, assets/fonts/Caveat-OFL.txt): what is written on the polaroids' strips */
-@font-face { font-family: 'Caveat'; src: url('assets/fonts/caveat-latin-400-normal.woff2') format('woff2'); font-display: block; }
+@font-face { font-family: 'Caveat'; src: url('assets/fonts/caveat-latin-400-normal.woff2?v=95b77c08e6') format('woff2'); font-display: block; }
 /* the old operators' own hands on their letters (SIL OFL 1.1, assets/fonts): jk's, Nothing You Could Do; aw's, Indie Flower */
-@font-face { font-family: 'Nothing You Could Do'; src: url('assets/fonts/nothing-you-could-do-latin-400-normal.woff2') format('woff2'); font-display: block; }
-@font-face { font-family: 'Indie Flower'; src: url('assets/fonts/indie-flower-latin-400-normal.woff2') format('woff2'); font-display: block; }
+@font-face { font-family: 'Nothing You Could Do'; src: url('assets/fonts/nothing-you-could-do-latin-400-normal.woff2?v=44030a3465') format('woff2'); font-display: block; }
+@font-face { font-family: 'Indie Flower'; src: url('assets/fonts/indie-flower-latin-400-normal.woff2?v=c99d7d78e2') format('woff2'); font-display: block; }
 /* the login note that comes down at 04:44, in a hand nobody in the room has (SIL OFL 1.1, assets/fonts): Covered By Your
    Grace, Arnold's pick (2026-10-11) */
-@font-face { font-family: 'Covered By Your Grace'; src: url('assets/fonts/covered-by-your-grace-latin-400-normal.woff2') format('woff2'); font-display: block; }
+@font-face { font-family: 'Covered By Your Grace'; src: url('assets/fonts/covered-by-your-grace-latin-400-normal.woff2?v=46ef71eb3a') format('woff2'); font-display: block; }
 
 #scene-holder {
   position: absolute;
@@ -399,6 +399,9 @@ body.title #hud, body.title #build-note { visibility: hidden !important; }
 
 /* the start's pull-back (app.js, the start): the raster comes up in a moment as the glass warms (the knob's warm-up, brief) */
 #terminal.warm-brief #term-tube { animation: warm-brief .45s ease-out; }
+/* the start's flight (app.js, the start): the layers' copies are drawn once under the close-up's glass, their LEDs held still
+   until the move begins */
+.cam-flight.parked * { animation-play-state: paused !important; }
 @keyframes warm-brief {
   0%   { transform: scaleY(.02); opacity: 0; }
   45%  { transform: scaleY(1.02); opacity: .85; }

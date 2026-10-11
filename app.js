@@ -37,12 +37,16 @@
   const SVG = 'http://www.w3.org/2000/svg';
 
   // ------------------------------------------------------------ load scene
+  // A file the page fetches itself, at its build's version (build-static.js writes window.vigilV into the published
+  // index.html: a stale cached index then loads its own old files, a fresh one the new; the final sweep's live audit,
+  // 2026-10-11). Served by serve.js there is no table, and the name is as it is.
+  const V = f => f + (window.vigilV && window.vigilV[f] ? '?v=' + window.vigilV[f] : '');
   // Each fetched once (Arnold, 2026-10-10: on a cold load both came twice). The drawing's text is shared with traces.js
   // (the old operators' polaroids are made from it); Caveat's bytes are read here, made the page's Caveat before anything
   // is drawn in it (so style.css's face, for the stills pages, is never needed here) and put in the night-1 polaroid's
   // picture, below.
-  const sceneText = window.vigilScene = fetch('scene.svg').then(r => r.text());
-  const caveatBytes = fetch('assets/fonts/caveat-latin-400-normal.woff2').then(r => r.ok ? r.arrayBuffer() : Promise.reject()).catch(() => null);
+  const sceneText = window.vigilScene = fetch(V('scene.svg')).then(r => r.text());
+  const caveatBytes = fetch(V('assets/fonts/caveat-latin-400-normal.woff2')).then(r => r.ok ? r.arrayBuffer() : Promise.reject()).catch(() => null);
   await caveatBytes.then(b => { if (b) { const f = new FontFace('Caveat', b, { display: 'block' }); document.fonts.add(f); return f.load(); } }).catch(() => {});
   holder.innerHTML = await sceneText;
   const scene = holder.querySelector('svg');
@@ -104,8 +108,10 @@
   {
     const ceil = $('ceiling'), CU = window.ceilingUp, paths = [...ceil.querySelectorAll('path')], num = p => +(p.id.split('_')[1] || 1);
     const radials = paths.filter(p => num(p) >= 2 && num(p) <= 2 * CU.GRID.J + 2).map(p => ({ j: num(p) - CU.GRID.J - 2, d: p.getAttribute('d') }));
-    const arch = paths.find(p => p.id === 'Vector_' + (2 * CU.GRID.J + 3)), len = arch.getTotalLength(), n = Math.ceil(len / .5);
-    const top = Array.from({ length: n + 1 }, (_, i) => { const q = arch.getPointAtLength(len * i / n); return [q.x - 560, q.y]; });   // (#ceiling sits at translate(-560 0))
+    // (measured by pathlen.js: the browser's getPointAtLength, called 5,000 times here, was 0.7 s of the load; the final
+    // sweep's live audit, 2026-10-11)
+    const arch = paths.find(p => p.id === 'Vector_' + (2 * CU.GRID.J + 3)), am = window.pathLength(arch), len = am.length, n = Math.ceil(len / .5);
+    const top = Array.from({ length: n + 1 }, (_, i) => { const q = am.at(len * i / n); return [q[0] - 560, q[1]]; });   // (#ceiling sits at translate(-560 0))
     const above = CU.above({ radials, top, view: [-580, SCENE_TOP, 2020, 0] });
     paths.find(p => p.id === 'Vector').setAttribute('stroke', 'none');
     const under = document.createElementNS(SVG, 'g'), over = document.createElementNS(SVG, 'g');
@@ -268,14 +274,16 @@
   // first and the upper lifts last. Drawn in window pixels, over everything but the fall-asleep screen and the menu.
   const eyes = (() => {
     const LID = { fill: '#040406', line: '#B4B4B4', meet: .56, a: .6, off: 4, step: .2 };
-    const el = document.createElementNS(SVG, 'svg'); el.id = 'eyelids';
+    const el = document.createElement('canvas'); el.id = 'eyelids';
     Object.assign(el.style, { position: 'fixed', left: '0', top: '0', width: '100vw', height: '100vh', zIndex: '40', pointerEvents: 'none', display: 'none' });
     document.body.appendChild(el);
+    const cx2 = el.getContext('2d');
     let up = 1, down = 1, run = 0, covered = false;
     // the lens for this window and these opennesses: its two curves, each from the left end to the right
-    function lens(w, h, ou, od) {
+    function lens(w, h, ou, od, sampled = true) {
       const m = h * LID.meet, a = w * LID.a, cx = w / 2, at0 = Math.sqrt(1 - (cx / a) ** 2);
       const bu = ou * (m + LID.off) / at0, bl = od * (h - m + LID.off) / at0;
+      if (!sampled) return { m, bu, bl, a, cx };
       const arc = (b, sign) => {
         const pts = []; let th = Math.PI;
         while (th > 0) { pts.push([cx + a * Math.cos(th), m - sign * b * Math.sin(th)]); th -= LID.step / (Math.hypot(a * Math.sin(th), b * Math.cos(th)) || 1); }
@@ -283,15 +291,35 @@
       };
       return { up: arc(bu, 1), down: arc(bl, -1), m, bu, bl };
     }
+    // Drawn on a canvas of its own (the final sweep's live audit, 2026-10-11). Each lid is the window above (or below) the
+    // line where the eyes meet, less half an ellipse about (cx, m), half-widths a and bu (or bl): the window filled, each
+    // half cut out as a whole ellipse under a rectangle clip, and the line stroked the same way. As one SVG path a window
+    // wide with an elliptical hole (sampled every 0.2 px and its markup rebuilt every frame at first, then SVG arcs), a
+    // blink took frames of 60 to 130 ms at 2560 x 1440 while the start's camera pulled back: the GPU drew that path through
+    // a mask the size of the window each frame. A whole ellipse and a rectangle it draws from their own geometry, and the
+    // canvas is a layer of its own, so nothing under it is drawn again.
     function draw() {
-      const w = innerWidth, h = innerHeight;
-      if ((up >= 1 && down >= 1) || covered) { el.style.display = 'none'; el.innerHTML = ''; return; }
-      el.style.display = ''; el.setAttribute('viewBox', `0 0 ${w} ${h}`);
-      const big = `M${-w} ${-h}H${2 * w}V${2 * h}H${-w}Z`;
-      if (up <= 0 && down <= 0) { el.innerHTML = `<path d="${big}" fill="${LID.fill}"/>`; return; }
-      const L = lens(w, h, Math.max(0, up), Math.max(0, down)), f = p => p[0].toFixed(2) + ' ' + p[1].toFixed(2);
-      const hole = 'M' + L.up.map(f).join('L') + 'L' + L.down.slice().reverse().map(f).join('L') + 'Z';
-      el.innerHTML = `<path d="${big} ${hole}" fill="${LID.fill}" fill-rule="evenodd"/><path d="${hole}" fill="none" stroke="${LID.line}" stroke-width="1" stroke-linejoin="round"/>`;
+      const w = innerWidth, h = innerHeight, dpr = devicePixelRatio || 1;
+      if ((up >= 1 && down >= 1) || covered) { el.style.display = 'none'; return; }
+      el.style.display = '';
+      const W = Math.round(w * dpr), H = Math.round(h * dpr);
+      if (el.width !== W || el.height !== H) { el.width = W; el.height = H; }
+      const c = cx2; c.setTransform(dpr, 0, 0, dpr, 0, 0);
+      c.globalCompositeOperation = 'source-over'; c.clearRect(0, 0, w, h);
+      c.fillStyle = LID.fill; c.fillRect(0, 0, w, h);
+      if (up <= 0 && down <= 0) return;
+      const L = lens(w, h, Math.max(0, up), Math.max(0, down), false);
+      const halfEllipse = (b, upper, paint) => {
+        if (b <= 0) return;
+        // (the clip's edge on a whole device pixel: mid-pixel, the two halves' cuts would leave a faint seam along it)
+        const mm = Math.round(L.m * dpr) / dpr;
+        c.save(); c.beginPath(); c.rect(0, upper ? 0 : mm, w, upper ? mm : h - mm); c.clip();
+        c.beginPath(); c.ellipse(L.cx, L.m, L.a, b, 0, 0, 2 * Math.PI); paint(); c.restore();
+      };
+      c.globalCompositeOperation = 'destination-out';
+      halfEllipse(L.bu, true, () => c.fill()); halfEllipse(L.bl, false, () => c.fill());
+      c.globalCompositeOperation = 'source-over'; c.strokeStyle = LID.line; c.lineWidth = 1;
+      halfEllipse(L.bu, true, () => c.stroke()); halfEllipse(L.bl, false, () => c.stroke());
     }
     addEventListener('resize', draw);
     const set = (u, d) => { up = u; down = d; draw(); };
@@ -331,7 +359,8 @@
     }
     async function blink(b = { close: .11, shut: .04, open: .17 }) {
       if (!await to(0, 0, b.close * 1000)) return;
-      await wait(b.shut * 1000);
+      // (b.whileShut: done while the eyes are shut, and they stay shut until it is: the start swaps its flight back here)
+      await Promise.all([wait(b.shut * 1000), b.whileShut ? b.whileShut() : null]);
       await to(1, 1, b.open * 1000);
     }
     // heavy and slow, partway and back (the first sleep's drooping): the upper lid to u, the lower to d
@@ -343,7 +372,10 @@
     // shut, with the fall-asleep screen over them (it is inside the stage, under this layer): that screen holds the dark,
     // opaque (#night-over.shut), and the lids step aside until the eyes open (cover(false))
     const cover = on => { covered = !!on; $('night-over').classList.toggle('shut', covered); draw(); };
-    return { set, to, blink, droop, blinkAt, lens, LID, cover, close: (ms = 180) => to(0, 0, ms), open: (ms = 260) => to(1, 1, ms), shut: () => { run++; set(0, 0); }, get state() { return [up, down]; } };
+    // (drawn once nearly shut while the page is still black, the start's close-up not yet shown: the GPU readies what it draws
+    // the lids with then, not in the first blink, where it cost a frame of 50 to 160 ms; the final sweep's live audit)
+    const warm = async () => { if (up < 1 || down < 1) return; set(.04, .04); await new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r))); if (up === .04 && down === .04) set(1, 1); };
+    return { set, to, blink, droop, blinkAt, lens, LID, cover, warm, close: (ms = 180) => to(0, 0, ms), open: (ms = 260) => to(1, 1, ms), shut: () => { run++; set(0, 0); }, get state() { return [up, down]; } };
   })();
 
   // the title is up (below, "the title"): the keys move its choices and go down silent, the room takes no clicks, and the
@@ -2711,6 +2743,11 @@
     if (audio?.master) audio.master.gain.setTargetAtTime(volume, audio.currentTime, .02);
   }
   // (the room's sound carries on while the game is paused: the hum, the fans, the keys)
+  // decoding before the first key or click: an offline context (the autoplay rule is for contexts that play; creating the
+  // room's before a gesture logged "The AudioContext was not allowed to start" on every warm load: the final sweep's live
+  // audit, 2026-10-11); its buffers play in the room's context as any buffer does
+  let decodeCtx = null;
+  const decoder = () => audio || (decodeCtx || (decodeCtx = new OfflineAudioContext(1, 1, 48000)));
   function ac() {
     if (!audio) audio = makeAudio();
     if (audio.state === 'suspended') audio.resume();
@@ -2774,7 +2811,7 @@
   // any pack folder dropped into assets/sounds shows up too: assets/sounds/packs.json, which serve.js makes on the fly and
   // build-static.js writes for a static host (one path either way: /packs first 404'd on the static host)
   // (each pack in the list says which of the files its loader would ask for are missing, so none is asked for: no 404s)
-  const packList = fetch('assets/sounds/packs.json').then(r => r.ok ? r.json() : []).catch(() => []);
+  const packList = fetch(V('assets/sounds/packs.json')).then(r => r.ok ? r.json() : []).catch(() => []);
   const missingIn = async dir => new Set((await packList).find(p => p.dir === dir)?.missing || []);
   packList.then(list => {
     for (const p of list) {
@@ -2871,7 +2908,7 @@
     return pack;
   }
   async function loadPackNow(name) {
-    const ctx = ac();
+    const ctx = decoder();
     if (PACKS[name].mv) {
       const dir = 'assets/sounds/' + (PACKS[name].dir || name) + '/';
       const cfg = await fetch(dir + 'config.json').then(r => r.json());
@@ -3140,12 +3177,12 @@
   const fxCache = {};
   // (only what is there: assets/sounds/fx.json lists the recordings, serve.js on the fly, build-static.js for a static
   // host. It used to try every name as .wav, .mp3 and .ogg: 24 404s a load in the console, the dry run, 2026-10-11)
-  const fxList = fetch('assets/sounds/fx.json').then(r => r.ok ? r.json() : []).catch(() => []);
+  const fxList = fetch(V('assets/sounds/fx.json')).then(r => r.ok ? r.json() : []).catch(() => []);
   function fxBuffer(name) {
     if (!(name in fxCache)) fxCache[name] = (async () => {
       const file = (await fxList).find(f => f.replace(/\.(wav|mp3|ogg)$/i, '') === name);
       if (!file) return null;
-      try { const r = await fetch(`assets/sounds/fx/${encodeURIComponent(file)}`); if (r.ok) return await ac().decodeAudioData(await r.arrayBuffer()); } catch (e) {}
+      try { const r = await fetch(`assets/sounds/fx/${encodeURIComponent(file)}`); if (r.ok) return await decoder().decodeAudioData(await r.arrayBuffer()); } catch (e) {}
       return null;
     })();
     return fxCache[name];
@@ -3335,7 +3372,8 @@
     }
     (function frame(now) {
       const dt = Math.min(100, now - last); last = now;
-      if (!room.still) {
+      // (not from the start's close-up until its camera has settled: the ceiling is hidden behind the glass, then flies as a copy)
+      if (!room.still && !document.body.classList.contains('title')) {
         C.step(st, dt, { u: tx, v: ty, idleMs: now - lastHand, seen: look.rest <= 0 && !holding(), blind });
         const a = st.ang, f = st.focus;
         if (!drawn || Math.abs(a[0] - drawn[0]) > .002 || Math.abs(a[1] - drawn[1]) > .002 || Math.abs(f - drawn[2]) > .0005) { lensG.innerHTML = C.lensSvg(a, f); drawn = [a[0], a[1], f]; }
@@ -7865,7 +7903,7 @@
     const SEQ = { glass: .3, bios: .25, pull: [.1, 3.4], settle: 3.8,
       blinks: [{ at: 2.25, close: .16, shut: .1, open: .26 }, { at: 3.5, close: .11, shut: .04, open: .17 }] };
     const ease = u => { u = Math.max(0, Math.min(1, u)); return u * u * (3 - 2 * u); };
-    let C = null, S0 = 1, t0 = 0, PAN0 = [0, 0], unit = 1, wraps = null, posed = false;
+    let C = null, S0 = 1, t0 = 0, PAN0 = [0, 0], unit = 1, wraps = null, posed = false, faceM = null;
     const face = screenG.querySelector('svg path:nth-of-type(2)');
     // the tube's middle (the terminal's middle through its mapping) and the scale at which its glass covers the window
     function frame() {
@@ -7873,8 +7911,8 @@
       C = [(H[0] * x + H[1] * y + H[2]) / w, (H[3] * x + H[4] * y + H[5]) / w];
       // (read through the monitor's camera group: its own transform left out, so a resize mid-move reads the glass at rest; screen
       // matrices, as the glass is inside a nested svg, where getCTM stops)
-      const mw = wraps.layers.find(l => l.z === 'monitor').w.g, M = mw.getScreenCTM().inverse().multiply(face.getScreenCTM()), len = face.getTotalLength(), outline = [];
-      for (let i = 0; i < 2000; i++) { const p = face.getPointAtLength(len * i / 2000); outline.push([M.a * p.x + M.c * p.y + M.e, M.b * p.x + M.d * p.y + M.f]); }
+      const mw = wraps.layers.find(l => l.z === 'monitor').w.g, M = mw.getScreenCTM().inverse().multiply(face.getScreenCTM()), fm = faceM || (faceM = window.pathLength(face)), len = fm.length, outline = [];
+      for (let i = 0; i < 2000; i++) { const [px, py] = fm.at(len * i / 2000); outline.push([M.a * px + M.c * py + M.e, M.b * px + M.d * py + M.f]); }
       const reach = dir => { let best = 0; for (let i = 0; i < outline.length; i++) { const a = outline[i], b = outline[(i + 1) % outline.length], q = [b[0] - a[0], b[1] - a[1]], den = dir[0] * q[1] - dir[1] * q[0]; if (Math.abs(den) < 1e-9) continue; const t = ((a[0] - C[0]) * q[1] - (a[1] - C[1]) * q[0]) / den, u = ((a[0] - C[0]) * dir[1] - (a[1] - C[1]) * dir[0]) / den; if (t > 0 && u >= 0 && u <= 1) best = Math.max(best, t); } return best; };
       const half = [innerWidth / 2 / scale, innerHeight / 2 / scale];
       S0 = 1.03 * Math.max(...[[1, 1], [-1, 1], [1, -1], [-1, -1]].map(([a, b]) => 1 / reach([a * half[0], b * half[1]])));
@@ -7901,22 +7939,106 @@
     function camAt(s) { const e = ease((s - SEQ.pull[0]) / (SEQ.pull[1] - SEQ.pull[0])); return { t: t0 * (1 - e), pan: [PAN0[0] * (1 - e), PAN0[1] * (1 - e)], e }; }
     const kOf = (z, c) => z / (z - c.t * ZTUBE);
     const mat = (k, c) => [k, 0, 0, k, C[0] + c.pan[0] - k * C[0], C[1] + c.pan[1] - k * C[1]];
+    // (the close-up, s < 0: the glass covers the window, so only the monitor's layer is drawn. Every other layer was drawn and
+    // animated behind it at three times its size, the rack LEDs and the ceiling camera repainting the room each frame: 6 s
+    // of the main thread's 15 at 1280 x 720; the final sweep's live audit, 2026-10-11)
     function pose(s) {
-      const c = camAt(s), ahead = z => z - c.t * ZTUBE >= NEAR;
-      for (const l of wraps.layers) { const z = ZM[l.z]; l.w.g.style.display = ahead(z) ? '' : 'none'; if (ahead(z)) setM(l.w, mat(kOf(z, c), c)); }
-      const rn = kOf(ZM.mug, c) / kOf(ZM.desk, c); setM(wraps.note, [rn, 0, 0, rn, C[0] - rn * C[0], C[1] - rn * C[1]]);
-      wraps.note.g.style.display = ahead(ZM.mug) ? '' : 'none';
+      const c = camAt(s), shut = s < 0, ahead = z => z - c.t * ZTUBE >= NEAR, shown = l => ahead(ZM[l.z]) && (!shut || l.z === 'monitor');
+      const rn = kOf(ZM.mug, c) / kOf(ZM.desk, c);
+      if (flight) {
+        for (const f of flight.layers) { const on = ahead(ZM[f.z]); if (f.on !== on) { f.svg.style.visibility = on ? '' : 'hidden'; f.on = on; } if (on) f.at(mat(kOf(ZM[f.z], c), c)); }
+        const md = mat(kOf(ZM.desk, c), c), on = ahead(ZM.mug);
+        if (flight.note.on !== on) { flight.note.svg.style.visibility = on ? '' : 'hidden'; flight.note.on = on; }
+        if (on) flight.note.at(mul(md, [rn, 0, 0, rn, C[0] - rn * C[0], C[1] - rn * C[1]]));
+      } else {
+        for (const l of wraps.layers) { const on = shown(l); if (l.w.g.style.display !== (on ? '' : 'none')) l.w.g.style.display = on ? '' : 'none'; if (on) setM(l.w, mat(kOf(ZM[l.z], c), c)); }
+        setM(wraps.note, [rn, 0, 0, rn, C[0] - rn * C[0], C[1] - rn * C[1]]);
+        wraps.note.g.style.display = ahead(ZM.mug) && !shut ? '' : 'none';
+      }
       const km = kOf(ZTUBE, c), Mm = mat(km, c);
       wraps.tw.style.transform = `matrix(${Mm.join(',')})`;
-      setM(wraps.glass, Mm);
-      for (const w of [wraps.steam, wraps.mug3d]) { w.g.style.display = ahead(ZM.mug) ? '' : 'none'; if (ahead(ZM.mug)) setM(w, mat(kOf(ZM.mug, c), c)); }
+      if (flight) {
+        const [gl, ...mug] = flight.over, on = ahead(ZM.mug);
+        gl.at(Mm);
+        for (const f of mug) { if (f.on !== on) { f.svg.style.visibility = on ? '' : 'hidden'; f.on = on; } if (on) f.at(mat(kOf(ZM.mug, c), c)); }
+      } else {
+        setM(wraps.glass, Mm);
+        for (const w of [wraps.steam, wraps.mug3d]) { w.g.style.display = ahead(ZM.mug) && !shut ? '' : 'none'; if (ahead(ZM.mug)) setM(w, mat(kOf(ZM.mug, c), c)); }
+      }
       term.setK(1.15 * km * scale * (devicePixelRatio || 1));
       posed = c.e < 1;
       return { c, km, mats: Object.fromEntries([...wraps.layers.map(l => [l.z, mat(kOf(ZM[l.z], c), c)]), ['note-rel', rn]]) };
     }
+    // The flight (the final sweep's live audit, 2026-10-11). The room is one SVG, so a camera move re-rasterized all of it
+    // every frame: at 2560 x 1440 the GPU took 300 to 450 ms for a frame and the pull-back ran at 140 to 200 frames in 4 s
+    // with stalls; with the room hidden, 445. So for the move each depth layer is copied into an SVG of its own, laid exactly
+    // over the scene's (same box, same viewBox), and posed by a CSS transform, which the compositor applies to a texture
+    // drawn once: no raster while it moves. Drawn once at the largest it will be (the start of the move: from there it only
+    // gets smaller), so it is never a bitmap scaled up. The originals stay where they are, hidden (visibility, so their
+    // ids, clip paths and the game's own lookups keep working); at the end of the move the camera is at rest, the copies
+    // match the originals exactly, and they swap back. The desk note flies on its own (it scales against the desk).
+    // The copies are made while the page is still black, before the close-up shows, and posed under the glass with their
+    // animations held (parked), so they are drawn once there, where nothing can be seen, and not at the click. They are
+    // swapped back for the originals inside the second blink, the eyes held shut until the swapped frame is drawn (it
+    // re-rasterizes the room at its own size once: 0.4 s at 2560 x 1440, which froze the blink when it came at the end of
+    // the move).
+    let flight = null;
+    // (frames, or half a second: a hidden tab has none, and the eyes would stay shut until it was shown again)
+    // the swap's slow frame come and gone: a frame over 40 ms, then six in a row under 25 ms (the GPU caught up: two were not enough, a second, smaller slow frame came after them); 350 ms with
+    // no slow frame (a machine quick enough not to have one); or 1.5 s. (Two quick frames alone came too soon: the page runs a
+    // few frames ahead before the GPU's stall holds it, and the eyes opened inside the stall, all at once.)
+    const steady = () => Promise.race([new Promise(done => { const t0 = performance.now(); let last = 0, ok = 0, slow = false; const step = t => { if (last) { const d = t - last; if (d > 40) slow = true; ok = d < 25 ? ok + 1 : 0; } last = t; if ((slow && ok >= 6) || (!slow && t - t0 > 350)) done(); else requestAnimationFrame(step); }; requestAnimationFrame(step); }), wait(1500)]);
+    const nextFrames = n => Promise.race([new Promise(done => { const step = () => (n-- <= 0 ? done() : requestAnimationFrame(step)); requestAnimationFrame(step); }), wait(500)]);
+    const mul = (A, B) => [A[0] * B[0] + A[2] * B[1], A[1] * B[0] + A[3] * B[1], A[0] * B[2] + A[2] * B[3], A[1] * B[2] + A[3] * B[3], A[0] * B[4] + A[2] * B[5] + A[4], A[1] * B[4] + A[3] * B[5] + A[5]];
+    function fly() {
+      if (flight || !wraps) return;
+      // (a copy is laid over the svg its original is in, the scene or the overlay: same box, same viewBox; their user units are
+      // stage px, and a box starts at its viewBox's corner, o)
+      const roots = new Map([[scene, { after: scene }], [overlay, { after: overlay }]]);
+      for (const [r, v] of roots) { v.box = getComputedStyle(r); v.o = [-parseFloat(v.box.left), -parseFloat(v.box.top)]; }
+      const copy = (src, z, drop, root = scene) => {
+        const R = roots.get(root), box = R.box, o = R.o;
+        const svg = document.createElementNS(SVG, 'svg');
+        for (const a of ['viewBox', 'width', 'height', 'fill', 'preserveAspectRatio']) if (root.hasAttribute(a)) svg.setAttribute(a, root.getAttribute(a));
+        Object.assign(svg.style, { position: 'absolute', left: box.left, top: box.top, width: box.width, height: box.height, transformOrigin: '0 0', willChange: 'transform', pointerEvents: 'none', overflow: 'visible' });
+        svg.classList.add('cam-flight', 'parked');
+        const g = src.cloneNode(true); g.removeAttribute('transform'); g.style.display = ''; g.style.visibility = '';
+        if (drop) g.querySelector('#' + drop)?.remove();
+        svg.appendChild(g); R.after.after(svg); R.after = svg;
+        // a stage matrix as the box's CSS transform (the box's origin is the viewBox's corner, o in stage px)
+        return { svg, z, on: true, at: M => { svg.style.transform = `matrix(${M[0]},${M[1]},${M[2]},${M[3]},${M[4] + o[0] - (M[0] * o[0] + M[2] * o[1])},${M[5] + o[1] - (M[1] * o[0] + M[3] * o[1])})`; } };
+      };
+      const layers = [];
+      // (in the scene's own order, bottom first: the room frame, wrapped last, is its first child)
+      for (const l of [...wraps.layers].sort((a, b) => a.w.g.compareDocumentPosition(b.w.g) & Node.DOCUMENT_POSITION_FOLLOWING ? -1 : 1)) {
+        layers.push(copy(l.w.g, l.z, l.z === 'desk' ? 'cam-note' : null));
+        if (l.z === 'desk') {
+          // the note: its wrap, copied with the transform its parent space has in the scene (wraps.note.P)
+          const P = wraps.note.P, g = document.createElementNS(SVG, 'g'); g.setAttribute('transform', `matrix(${[P.a, P.b, P.c, P.d, P.e, P.f].join(' ')})`);
+          g.appendChild(wraps.note.g.cloneNode(true)); g.firstChild.removeAttribute('transform');
+          flight = { layers, note: copy(g, 'note') };
+        }
+      }
+      if (!flight) flight = { layers, note: { svg: document.createElementNS(SVG, 'svg'), on: false, at: () => {} } };
+      // the overlay's: the glass (its glare is white through blur filters, so drawn on its own it looks as it does blended
+      // with screen; redrawn each frame at the close-up's size, the blurs were most of what was left of the GPU's work), and
+      // the mug and its steam, which come into view partway
+      flight.over = [copy(wraps.glass.g, 'glass', null, overlay), copy(wraps.mug3d.g, 'mug3d', null, overlay), copy(wraps.steam.g, 'steam', null, overlay)];
+      for (const l of wraps.layers) l.w.g.style.visibility = 'hidden';
+      for (const w of [wraps.glass, wraps.mug3d, wraps.steam]) w.g.style.visibility = 'hidden';
+    }
+    const unpark = () => { if (flight) for (const f of [...flight.layers, flight.note, ...flight.over]) f.svg.classList.remove('parked'); };
+    function land() {
+      if (!flight) return;
+      for (const l of wraps.layers) l.w.g.style.visibility = '';
+      for (const w of [wraps.glass, wraps.mug3d, wraps.steam]) w.g.style.visibility = '';
+      for (const f of [...flight.layers, flight.note, ...flight.over]) f.svg.remove();
+      flight = null;
+    }
     // the rest: every transform gone, the tube's resolution its own
     function rest() {
       if (!wraps) return;
+      land();
       for (const l of wraps.layers) { l.w.g.removeAttribute('transform'); l.w.g.style.display = ''; }
       for (const w of [wraps.note, wraps.glass, wraps.steam, wraps.mug3d]) { w.g.removeAttribute('transform'); w.g.style.display = ''; }
       wraps.tw.style.transform = ''; terminal.style.willChange = '';
@@ -7989,15 +8111,24 @@
       pullAt = performance.now();
       term.title(null);
       face.style.transition = `fill ${SEQ.glass}s ease-out`; screenG.classList.remove('off');
+      // (and the monitor's copy, which is what shows while the camera moves: its glass warms the same way)
+      const mc = flight?.layers.find(f => f.z === 'monitor')?.svg, ms = mc?.querySelector('#' + screenG.id), mf = ms?.querySelector('svg path:nth-of-type(2)');
+      if (mf) { mf.style.transition = face.style.transition; ms.classList.remove('off'); }
       terminal.classList.add('warm-brief'); setTimeout(() => terminal.classList.remove('warm-brief'), 500);
       terminal.style.willChange = 'auto';             // (scaled, the tube's layer is drawn again at each size, not a texture stretched)
-      for (const b of SEQ.blinks) setTimeout(() => eyes.blink(b), b.at * 1000);
+      fly(); unpark();
+      let rested = false;
+      // (the shut frame on the screen first, then the swap, then the eyes open only when frames come steadily again: the
+      // swap's frame is slow to draw, and in the same frame as the shut lids it left them half shut on the screen through it,
+      // then opening, they jumped open; the final sweep's live audit)
+      const settle = async () => { if (rested) return; rested = true; await nextFrames(2); rest(); await steady(); };
+      SEQ.blinks.forEach((b, i) => setTimeout(() => eyes.blink(i === SEQ.blinks.length - 1 ? { ...b, whileShut: settle } : b), b.at * 1000));
       (function tick() {
         const s = (performance.now() - pullAt) / 1000;
-        if (s >= SEQ.pull[1]) { rest(); return; }
+        if (s >= SEQ.pull[1]) { pose(SEQ.pull[1]); return; }
         pose(s); requestAnimationFrame(tick);
       })();
-      setTimeout(() => { if (posed) rest(); }, SEQ.pull[1] * 1000 + 300);   // (frames may stop in a hidden tab: it still ends)
+      setTimeout(settle, (SEQ.blinks.at(-1).at + 1) * 1000);   // (no blink came, or frames stopped in a hidden tab: it still ends)
       setTimeout(() => { catcher.style.display = 'none'; document.body.classList.remove('title'); face.style.transition = ''; playtest('start: the camera settled'); }, SEQ.settle * 1000);
       return wait(SEQ.bios * 1000);
     }
@@ -8007,6 +8138,8 @@
       (LOOK[ending] || LOOK.dark)();
       let begin = null; try { begin = localStorage.getItem('vigil.begin'); localStorage.removeItem('vigil.begin'); } catch (e) {}
       face.style.transition = 'none'; screenG.classList.add('off'); getComputedStyle(face).fill; face.style.transition = '';   // (the glass dark from the first paint: its own screen-off colour, no fade)
+      // (the copies made now, with the glass dark, and the lids drawn once: both while the page is still black)
+      fly(); await eyes.warm();
       pose(-1);
       catcher.style.display = '';
       if (begin === 'new') { playtest('start: new shift (from a fresh start)'); await wait(500); return pull(); }

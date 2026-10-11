@@ -420,11 +420,16 @@
       warp = K === K0 ? warp0 : { top: rs(warp0.top, W * K), bottom: rs(warp0.bottom, W * K), left: rs(warp0.left, H * K), right: rs(warp0.right, H * K) };
       return true;
     }
+    // In strips of K/2 canvas pixels, half a design unit, each placed by the bend at its middle: at the chair (K 2) a strip
+    // is one pixel, as it always was; seen larger (the start's close-up, K up to 12) a pixel a strip was 13,000 draws a
+    // paint, which made the close-up's hover lag (the final sweep's live audit, 2026-10-11). The bend's slope is at most
+    // about 0.15, so a strip's ends are within 0.1 design unit of the curve.
     function bend() {
+      const st = Math.max(1, Math.floor(K / 2)), W2 = flat.width, H2 = mid.height;
       m.clearRect(0, 0, mid.width, mid.height);
-      for (let x = 0; x < flat.width; x++) m.drawImage(flat, x, 0, 1, flat.height, x, warp.top[x], 1, flat.height + warp.bottom[x] - warp.top[x]);
+      for (let x = 0; x < W2; x += st) { const w = Math.min(st, W2 - x), c = Math.min(W2 - 1, x + (w >> 1)); m.drawImage(flat, x, 0, w, flat.height, x, warp.top[c], w, flat.height + warp.bottom[c] - warp.top[c]); }
       out.clearRect(0, 0, canvas.width, canvas.height);
-      for (let y = 0; y < mid.height; y++) out.drawImage(mid, 0, y, mid.width, 1, warp.left[y], y, mid.width + warp.right[y] - warp.left[y], 1);
+      for (let y = 0; y < H2; y += st) { const h = Math.min(st, H2 - y), c = Math.min(H2 - 1, y + (h >> 1)); out.drawImage(mid, 0, y, mid.width, h, warp.left[c], y, mid.width + warp.right[c] - warp.left[c], h); }
     }
     return { paint, layout, COLS, ROWS, CW, LH, TOP, PAD_X, PANE, W, H, mailHit: () => mailHit, titleHit: () => titleHits, setK, get K() { return K; } };
   };
