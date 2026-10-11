@@ -1,6 +1,8 @@
 /* ceilup.js — the ceiling above the frame, for looking up (stills, 2026-10-05; not loaded by the game yet).
 
-   The drawing's ceiling (scene.svg #ceiling) is one outline, 51 depth lines and 17 cross arches, and it already runs far
+   The drawing's ceiling (scene.svg #ceiling) is one outline, 97 depth lines and 17 cross arches (51 depth lines in the 1920
+   frame; Arnold's 2560 frame, 2026-10-11, carries the grid out to ±48: each new line within 0.12 px of this camera, so the
+   fit below is the 1920 one, unchanged), and it already runs far
    above the frame (to y -635 over the middle). Its camera is not the room's (drawer.js roomF, measured on the desk): the
    grid is a pitched fisheye, measured here by fitting a camera to the 839 places where its depth lines cross its arches.
    The fit (2026-10-05): a lens centred on the frame's middle (720, 540), focal length 1226, looking 12.6 degrees up, an
@@ -10,7 +12,7 @@
    not fit the racks: their verticals lean about 60% as much as it would make them, so the racks were drawn with a lens of
    their own, and anything standing in front of a rack is drawn through the racks' own verticals (post.js), not this.
 
-   On the ceiling a point is (j, k): j across, in the drawing's columns (0 the middle depth line, ±25 the outermost),
+   On the ceiling a point is (j, k): j across, in the drawing's columns (0 the middle depth line, ±48 the outermost),
    k in its rows (0 the outline's top arch, 16 the last); X = j w, Z = z0 + k dz, the ceiling one unit above the eye.
 
    What looking up adds: the depth lines go on past the top arch (k < 0), each starting exactly at its drawn end and on
@@ -19,12 +21,24 @@
    is sampled every 0.25 px of the screen. Pure: the page hands it the drawn depth lines' path data. */
 (function () {
   const CAM = { f: 1226.3845864, phi: .2205309872, cx: 720, cy: 540.0123657, k1: .0224557458, k2: -.0433932171 };
-  const GRID = { z0: .3933304165, dz: .1860515329, w: .1392201051, J: 25, K: 16 };
+  const GRID = { z0: .3933304165, dz: .1860515329, w: .1392201051, J: 48, K: 16 };
   const cosP = Math.cos(CAM.phi), sinP = Math.sin(CAM.phi);
+  /* The lens's radius for an angle off its axis. The fit's polynomial turns back at 86.8 degrees (a radius of 1529 px): fine
+     for every view up to 16:9, whose farthest corner looking up (with the lean and the parallax) is 1448 px out, but the
+     2560 frame's corners looking up are 1679 px out, past where the fitted lens can reach, and the depth lines folded back
+     short of them. So from 1455 px (73.9 degrees) the radius goes on growing: its rate of growth eases from the lens's own
+     to a floor (TAIL.m), matching the polynomial's value, slope and bend where they meet. Nothing within 1455 px moves. */
+  const poly = th => th * (1 + CAM.k1 * th * th + CAM.k2 * th ** 4);
+  const TAIL = (() => {
+    let lo = 0, hi = 1.5; for (let i = 0; i < 80; i++) { const m = (lo + hi) / 2; if (CAM.f * poly(m) < 1455) lo = m; else hi = m; }
+    const th = lo, D = 1 + 3 * CAM.k1 * th * th + 5 * CAM.k2 * th ** 4, B = 6 * CAM.k1 * th + 20 * CAM.k2 * th ** 3, m = .25;
+    return { th, g: poly(th), D, m, a: -B / (D - m) };
+  })();
+  const radius = th => { if (th <= TAIL.th) return CAM.f * poly(th); const t = th - TAIL.th; return CAM.f * (TAIL.g + TAIL.m * t + (TAIL.D - TAIL.m) * (1 - Math.exp(-TAIL.a * t)) / TAIL.a); };
   // a camera point (x right, y down, z ahead; the ceiling at y = -1) to the screen
   function project([X, Y, Z]) {
     const yc = Y * cosP + Z * sinP, zc = -Y * sinP + Z * cosP, h = Math.hypot(X, yc) || 1e-12;
-    const th = Math.atan2(h, zc), rd = CAM.f * th * (1 + CAM.k1 * th * th + CAM.k2 * th ** 4);
+    const rd = radius(Math.atan2(h, zc));
     return [CAM.cx + rd * X / h, CAM.cy + rd * yc / h];
   }
   const XZ = (j, k) => [j * GRID.w, GRID.z0 + k * GRID.dz];
@@ -57,7 +71,8 @@
   const pathOf = ps => 'M' + fmt(ps).split(' ').join('L');
 
   // the start of a drawn path: its first point and the direction it leaves in ("M x y C x1 y1 ..."), stage coordinates
-  function startOf(d, dx = -240) {
+  // (#ceiling sits at translate(-560 0) in the scene)
+  function startOf(d, dx = -560) {
     const n = d.match(/-?\d*\.?\d+(?:e-?\d+)?/g).slice(0, 4).map(Number);
     const p = [n[0] + dx, n[1]], c = [n[2] + dx, n[3]], l = Math.hypot(c[0] - p[0], c[1] - p[1]);
     return { p, t: [(c[0] - p[0]) / l, (c[1] - p[1]) / l] };
@@ -67,7 +82,8 @@
      nothing after the first `blend` of the run (a cubic Hermite), so the join is exact and smooth. */
   function extend(j, E, t, kMin = -1.95, blend = .35) {
     const k0 = invert(E, [j, 0])[1];
-    const m = k => at(j, k), span = k0 - kMin;
+    // (s runs from 0 at the end to sEnd at kMin; the blend's length is set by k -1.95, however far the line goes on)
+    const m = k => at(j, k), span = k0 + 1.95, sEnd = (k0 - kMin) / span;
     // the camera's line at the end and its direction, per unit of s (s = (k0 - k) / span: 0 at the end, 1 at kMin)
     const h = 1e-6, M0 = m(k0), M1 = m(k0 - h * span), dm = [(M1[0] - M0[0]) / h, (M1[1] - M0[1]) / h], sp = Math.hypot(...dm);
     const D = [E[0] - M0[0], E[1] - M0[1]], want = [-t[0] * sp, -t[1] * sp], T = [want[0] - dm[0], want[1] - dm[1]];
@@ -75,22 +91,27 @@
     const P = s => { const q = m(k0 - s * span), c = corr(s); return [q[0] + c[0], q[1] + c[1]]; };
     const out = [E.slice()];
     let s = 0, ds = 1e-4;
-    while (s < 1) {
-      const s2 = Math.min(1, s + ds), q = P(s2), p = out[out.length - 1], d = Math.hypot(q[0] - p[0], q[1] - p[1]);
+    while (s < sEnd) {
+      const s2 = Math.min(sEnd, s + ds), q = P(s2), p = out[out.length - 1], d = Math.hypot(q[0] - p[0], q[1] - p[1]);
       if (d > .25) { ds *= .5; continue; }
       out.push(q); s = s2; if (d < .12) ds *= 1.5;
     }
     return { pts: out, k0, offset: Math.hypot(...D), turn: Math.acos(Math.max(-1, Math.min(1, (-t[0] * dm[0] - t[1] * dm[1]) / sp))) * 180 / Math.PI };
   }
   /* The ceiling above the drawn outline, as svg: its fill, then the depth lines continued. radials: [{ j, d }] (the
-     drawn depth lines' path data, j -25..25); top: the drawn top arch's points (stage), for the fill's lower edge.
+     drawn depth lines' path data, j -48..48); top: the drawn top arch's points (stage), for the fill's lower edge.
      view: [x0, y0, x1, y1], what must be covered. */
-  function above({ radials, top, view = [-260, -620, 1700, 0] }) {
+  function above({ radials, top, view = [-580, -620, 2020, 0] }) {
     const ext = [];
+    // each line on until its end is out of the view (with 40 px to spare: the lean and the parallax): k -1.95 was enough up to
+    // 16:9; the 2560 frame's top corners need some lines to go on round the lens's edge
+    const outside = q => q[0] < view[0] - 40 || q[0] > view[2] + 40 || q[1] < view[1] - 40;
     for (const { j, d } of radials) {
       const s = startOf(d);
       if (s.p[1] > view[3] + 40) continue;
-      const e = extend(j, s.p, s.t);
+      let kMin = -1.95;
+      while (!outside(at(j, kMin)) && kMin > -60) kMin -= .5;
+      const e = extend(j, s.p, s.t, kMin);
       // keep only lines that reach into the view
       if (e.pts.some(q => q[0] >= view[0] - 2 && q[0] <= view[2] + 2 && q[1] >= view[1] - 2 && q[1] <= view[3])) ext.push({ j, ...e });
     }

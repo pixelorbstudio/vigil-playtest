@@ -104,9 +104,62 @@
     const shape = smooth([[1336, 300], [1362, 306], [1378, 330], [1380, 362], [1370, 392], [1362, 412], [1388, 430], [1420, 452], [1438, 492], [1430, 540], [1400, 590], [1352, 618], [1300, 606], [1268, 566], [1258, 516], [1270, 470], [1300, 438], [1318, 418], [1304, 394], [1294, 362], [1298, 330], [1314, 308]]);
     return soft(shape, '#7E7E7C', .085, 7);
   }
+  // Glenn (design.md, "Glenn's folder, decided"): the company's
+  // photo of his last night as an operator, 19 Dec 1987: the room, and on the tube, in upstairs' red, "Top of the
+  // board, '87." Typed where the terminal types (crt.js: 660 x 413 design units, 19px monospace, 30px in, the first row
+  // 52px down), bent as the tube bends it (crt.js bend(): columns to the glass's curved top and bottom, then rows to its
+  // curved sides) and mapped onto the glass by the page's homography (app.js: the quad and WARP, from the drawn face).
+  // Flat, in the phosphor red, no glow (a photo of the tube in the drawing's manner).
+  function tubeLine(sceneText, line, row = 0) {
+    const W = 660, H = 413, K = 2, TW = W * K, TH = H * K, FONT = 19, LH = FONT * 1.32, PAD_X = 30, TOP = 52;
+    const FAMILY = 'ui-monospace, "SF Mono", Menlo, Consolas, monospace';
+    const m0 = sceneText.match(/<g id="screen"[^>]*><svg x="([\d.]+)" y="([\d.]+)"/), sx = +m0[1], sy = +m0[2];
+    const quad = [[75.92, 15.87], [736.04, 15.87], [800.88, 428.69], [11.08, 428.69]].map(([x, y]) => [x + sx, y + sy]);
+    const solve = (A, b) => { const n = b.length, M = A.map((r, i) => [...r, b[i]]); for (let c = 0; c < n; c++) { let p = c; for (let r = c + 1; r < n; r++) if (Math.abs(M[r][c]) > Math.abs(M[p][c])) p = r; [M[c], M[p]] = [M[p], M[c]]; for (let r = 0; r < n; r++) if (r !== c) { const f = M[r][c] / M[c][c]; for (let k = c; k <= n; k++) M[r][k] -= f * M[c][k]; } } return M.map((r, i) => r[n] / r[i]); };
+    const Hm = (() => { const src = [[0, 0], [TW, 0], [TW, TH], [0, TH]], A = [], b = []; for (let i = 0; i < 4; i++) { const [x, y] = src[i], [u, v] = quad[i]; A.push([x, y, 1, 0, 0, 0, -u * x, -u * y]); b.push(u); A.push([0, 0, 0, x, y, 1, -v * x, -v * y]); b.push(v); } return solve(A, b); })();
+    const hmap = ([x, y]) => { const w = Hm[6] * x + Hm[7] * y + 1; return [(Hm[0] * x + Hm[1] * y + Hm[2]) / w, (Hm[3] * x + Hm[4] * y + Hm[5]) / w]; };
+    // WARP, as app.js builds it from the face (the screen's second path)
+    const WARP = { top: [], bottom: [], left: [], right: [] };
+    {
+      const scr = sceneText.slice(sceneText.indexOf('<g id="screen"')), face = scr.match(/<path[^>]* d="([^"]+)"/g)[1].match(/ d="([^"]+)"/)[1];
+      const n = face.match(/-?[\d.]+/g).map(Number), segs = [];
+      let p0 = [n[0], n[1]];
+      for (let i = 2; i + 5 < n.length; i += 6) { const s = [p0, [n[i], n[i + 1]], [n[i + 2], n[i + 3]], [n[i + 4], n[i + 5]]]; segs.push(s); p0 = s[3]; }
+      const bez = (s, t) => [0, 1].map(k => (1 - t) ** 3 * s[0][k] + 3 * (1 - t) ** 2 * t * s[1][k] + 3 * (1 - t) * t * t * s[2][k] + t ** 3 * s[3][k]);
+      const sample = list => list.flatMap(s => Array.from({ length: 64 }, (_, i) => bez(s, i / 63)));
+      const along = (pts, by, val) => { const a = pts.slice().sort((p, q) => p[by] - q[by]);
+        return z => { let i = a.findIndex(p => p[by] >= z); if (i <= 0) return a[Math.max(0, i)][val]; const p = a[i - 1], q = a[i]; return p[val] + (q[val] - p[val]) * (z - p[by]) / ((q[by] - p[by]) || 1); }; };
+      const yBot = along(sample([segs[0]]), 0, 1), xRight = along(sample([segs[1], segs[2]]), 1, 0);
+      const yTop = along(sample([segs[3], segs[4]]), 0, 1), xLeft = along(sample([segs[5], segs[6]]), 1, 0);
+      const [TL, TR, BR, BL] = quad.map(([x, y]) => [x - sx, y - sy]);
+      const lineX = (a, b) => y => a[0] + (b[0] - a[0]) * (y - a[1]) / (b[1] - a[1]);
+      const xLeftS = lineX(TL, BL), xRightS = lineX(TR, BR);
+      const map = ([x, y]) => { const q = hmap([x, y]); return [q[0] - sx, q[1] - sy]; };
+      const scaleY = (x, y) => map([x, y + 1])[1] - map([x, y])[1], scaleX = (x, y) => map([x + 1, y])[0] - map([x, y])[0];
+      for (let x = 0; x < TW; x++) { WARP.top[x] = (yTop(map([x, 0])[0]) - TL[1]) / scaleY(x, 0); WARP.bottom[x] = (yBot(map([x, TH - 1])[0]) - BL[1]) / scaleY(x, TH - 1); }
+      for (let y = 0; y < TH; y++) { const L = map([0, y]), R = map([TW - 1, y]); WARP.left[y] = (xLeft(L[1]) - xLeftS(L[1])) / scaleX(0, y); WARP.right[y] = (xRight(R[1]) - xRightS(R[1])) / scaleX(TW - 1, y); }
+    }
+    const lerpT = (t, i) => { const a = Math.max(0, Math.min(t.length - 1, Math.floor(i))), b = Math.min(t.length - 1, a + 1), f = i - a; return t[a] + (t[b] - t[a]) * f; };
+    // a design point to the stage: the column pass, the row pass, the glass
+    const toStage = ([x, y]) => {
+      const X = x * K, Y = y * K, Y1 = lerpT(WARP.top, X) + Y * (TH + lerpT(WARP.bottom, X) - lerpT(WARP.top, X)) / TH;
+      const X1 = lerpT(WARP.left, Y1) + X * (TW + lerpT(WARP.right, Y1) - lerpT(WARP.left, Y1)) / TW;
+      return hmap([X1, Y1]);
+    };
+    const cx = document.createElement('canvas').getContext('2d'); cx.font = `${FONT}px ${FAMILY}`;
+    const CW = cx.measureText('M').width, len = line.length * CW, y = TOP + row * LH + LH / 2;
+    const base = []; for (let x = PAD_X; x <= PAD_X + len + 1e-9; x += .25) base.push(toStage([x, y]));
+    let L = 0; for (let i = 1; i < base.length; i++) L += Math.hypot(base[i][0] - base[i - 1][0], base[i][1] - base[i - 1][1]);
+    const mid = PAD_X + len / 2, a = toStage([mid, y - .5]), b = toStage([mid, y + .5]), size = FONT * Math.hypot(b[0] - a[0], b[1] - a[1]);
+    const esc = t => t.replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+    return `<g id="tube-line"><path id="tube-line-base" d="M${base.map(f3).join('L')}" fill="none"/>`
+      + `<text font-family='${FAMILY}' font-size="${size.toFixed(3)}" fill="#ffb4b4" dominant-baseline="central"><textPath href="#tube-line-base" textLength="${L.toFixed(3)}" lengthAdjust="spacingAndGlyphs">${esc(line)}</textPath></text></g>`;
+  }
   const TRACES = {
-    ts: { strip: '01:12', crop: [360, 0, 1080, 1080], at: 'rack-right-door', shift: 240, svg: coat },
-    aw: { strip: '05:10', crop: [640, 0, 1040, 1040], at: 'rack-right-door-glass', shift: 240, svg: reflection },
+    ts: { strip: '01:12', crop: [360, 0, 1080, 1080], at: 'rack-right-door', shift: 560, svg: coat },
+    aw: { strip: '05:10', crop: [640, 0, 1040, 1040], at: 'rack-right-door-glass', shift: 560, svg: reflection },
+    // (cropped to the tube, so the red line reads held, at 1:1: 13.4 px type)
+    glenn: { strip: '05:30', crop: [370, 140, 450, 450], tube: "Top of the merit board, '87.", row: 0 },
   };
   // the end of the element that starts at i (its matching </g>)
   function closeOf(s, i) {
@@ -120,9 +173,11 @@
   async function photo(who) {
     const t = TRACES[who]; if (!t) return null;
     if (made[who]) return made[who];
-    scene = scene || fetch('scene.svg').then(r => r.text());
-    const v0 = await scene, i = v0.indexOf(`<g id="${t.at}"`), j = closeOf(v0, i);
-    const v = i < 0 || j < 0 ? v0 : v0.slice(0, j) + `<g transform="translate(${t.shift || 0} 0)">${t.svg()}</g>` + v0.slice(j);
+    scene = scene || window.vigilScene || fetch('scene.svg').then(r => r.text());   // (the page's own copy, if it has one: app.js)
+    const v0 = await scene;
+    let v;
+    if (t.tube) { const e = v0.lastIndexOf('</svg>'); v = v0.slice(0, e) + tubeLine(v0, t.tube, t.row) + v0.slice(e); }   // (on the glass, over everything: the tube's text is over the scene in the page)
+    else { const i = v0.indexOf(`<g id="${t.at}"`), j = closeOf(v0, i); v = i < 0 || j < 0 ? v0 : v0.slice(0, j) + `<g transform="translate(${t.shift || 0} 0)">${t.svg()}</g>` + v0.slice(j); }
     made[who] = { src: URL.createObjectURL(new Blob([v], { type: 'image/svg+xml' })), crop: t.crop, strip: t.strip };
     return made[who];
   }

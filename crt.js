@@ -10,7 +10,7 @@
    19px monospace, 1.32 line height, 30px side padding, the first row 52px down (under the status line), the
    top and bottom faded out. Colours come from the terminal element's CSS variables, so themes still work. */
 (function () {
-  const W = 660, H = 413, K = 2;                       // design size, and the canvas scale
+  const W = 660, H = 413, K0 = 2;                      // design size, and the canvas scale (setK changes it per tube)
   const PAD_X = 30, TOP = 52, BOTTOM = 22, FONT = 19, LH = FONT * 1.32;
   const FAMILY = 'ui-monospace, "SF Mono", Menlo, Consolas, monospace';
   const CLS = {                                        // the old #term-out classes, as colour and alpha
@@ -22,14 +22,20 @@
     df0: { color: '#e9edff' }, df1: { color: '#8fd3ff' }, df2: { color: '#f5b3e6' }, df3: { color: '#c7b8ff' },
     dfok: { color: '#b8f0c2', glow: '#b8f0c2' }, dfw: { color: '#ffffff', glow: '#ffffff' },
     // the night supervisor: a tag in inverse red, and their words in red; nothing else on the tube is red
-    'sup-tag': { color: '#22308f', bg: '#ff9d9d', glow: 'none' }, sup: { color: '#ffb4b4', glow: '#ff7a7a' },
+    'sup-tag': { color: '#22308f', bg: '#ff9d9d', glow: 'none' }, sup: { color: '#ffb4b4', glow: '#ff7a7a' }, 'sup-dim': { color: '#ffb4b4', glow: '#ff7a7a', alpha: .38 }, 'sup-time': { color: '#ffb4b4', glow: '#ff7a7a', alpha: .62 },
     'rs-won': { color: '#22308f', bg: '#b8f0c2', glow: 'none' }, 'rs-lost': { color: '#22308f', bg: '#ffd28a', glow: 'none' },
     // the kinds of trouble, in the tube's own tones and never red (red is the supervisor's and the strikes'): DOWN the
     // phosphor at its brightest, HOT amber (as its LED), STUCK violet, LOSS cyan
     pdown: { color: '#ffffff', glow: '#ffffff' }, phot: { color: '#ffd28a' }, pstuck: { color: '#c7b8ff' }, ploss: { color: '#8fd3ff' },
+    // OOM pink (2026-10-11: DEFRAG's second file's tint, the one tube tone left that isn't red, green or taken)
+    poom: { color: '#f5b3e6' },
   };
 
-  window.createCRT = function ({ canvas, host, warp }) {
+  window.createCRT = function ({ canvas, host, warp: warp0 }) {
+    // K: canvas pixels a design unit. 2 as the tube is seen from the chair; more while it is seen larger (the start's close-up
+    // and the camera pulling back from it: setK), so the text is never a bitmap scaled up. The glass's bend tables (warp0) are
+    // given at 2; at any other K they are resampled.
+    let K = K0, warp = warp0;
     canvas.width = W * K; canvas.height = H * K;
     const out = canvas.getContext('2d');
     const flat = document.createElement('canvas'), mid = document.createElement('canvas');
@@ -39,11 +45,21 @@
     f.font = `${FONT}px ${FAMILY}`; f.textBaseline = 'middle';
     const CW = f.measureText('M').width;               // one monospace cell
     const COLS = Math.floor((W - 2 * PAD_X) / CW), ROWS = Math.floor((H - TOP - BOTTOM) / LH);
+    // Glenn's pane (design.md section 5, "Surface and focus, decided", 5, with Arnold's two changes of 2026-10-10): n rows
+    // of his under the problem strip (3, or 1 folded), a hair rule, and the work under it. GAP: the rule's room, so the
+    // work's first row doesn't touch it. ICON: the columns his silhouette takes on the left (3 rows only).
+    const PANE = { GAP: { 3: 6, 1: 4 }, ICON: 5 };
+    const workTop = n => n ? TOP + n * LH + PANE.GAP[n] : TOP;
+    // the rows the work has under n rows of pane: at the prompt (the old bottom margin), and for a full view's frame (to
+    // the glass's bottom, as frames always drew one row more than the shell)
+    const layout = n => ({ top: workTop(n), rows: Math.floor((H - BOTTOM - workTop(n)) / LH), frameRows: Math.floor((H - 4 - workTop(n)) / LH),
+      cols: n === 3 ? COLS - PANE.ICON : COLS });
     const css = () => { const s = getComputedStyle(host); return { text: s.getPropertyValue('--term-text').trim() || '#e9edff', dim: s.getPropertyValue('--term-dim').trim() || '#aab4ee', glow: s.getPropertyValue('--term-glow').trim() || 'rgba(200,210,255,.45)' }; };
     const resolve = (c, pal) => c === 'var(--term-dim)' ? pal.dim : c === 'var(--term-text)' ? pal.text : c;
 
     /* view: { rows: [[{ text, cls }]], cursor: { row, col } | null, cursorOn, status: { energy, beans, low } | null,
        field: a square grid drawn over the text | null (see drawField) } */
+    let OFF = TOP;                                       // the work's first row's top (under the pane), this paint
     function paint(view) {
       const pal = css();
       f.clearRect(0, 0, W, H);
@@ -56,8 +72,10 @@
         f.fillText(view.burnText || '', PAD_X, 22);
         f.globalAlpha = 1;
       }
+      const top = view.pane ? workTop(view.pane.n) : TOP;
+      OFF = top;
       view.rows.forEach((segs, r) => {
-        const y = TOP + r * LH + LH / 2;
+        const y = top + r * LH + LH / 2;
         let col = 0;
         for (const s of segs) {
           if (!s.text) continue;
@@ -71,9 +89,12 @@
         }
       });
       f.globalAlpha = 1;
+      // hair rules between rows (Glenn's log: between his messages), at the top of each listed row, the pane's rule's ink
+      if (view.rules) { f.shadowBlur = 0; f.globalAlpha = .3; f.fillStyle = pal.dim; for (const r of view.rules) f.fillRect(PAD_X, Math.round(top + r * LH) - .5, W - 2 * PAD_X, 1); f.globalAlpha = 1; }
       if (view.field) view.field.pong ? drawPong(view.field, pal) : drawField(view.field, pal);
+      titleHits = view.title ? drawCloseUp(view.title, pal) : [];
       if (view.cursor && view.cursorOn) {
-        const x = PAD_X + view.cursor.col * CW, y = TOP + view.cursor.row * LH + LH / 2;
+        const x = PAD_X + view.cursor.col * CW, y = top + view.cursor.row * LH + LH / 2;
         f.shadowColor = pal.glow; f.shadowBlur = 6 * K; f.fillStyle = pal.text;
         f.fillRect(x, y - FONT * .55, FONT * .62, FONT * 1.05);
       }
@@ -83,6 +104,7 @@
       fade.addColorStop(0, 'rgba(0,0,0,0)'); fade.addColorStop(1, 'rgba(0,0,0,1)');
       f.fillStyle = fade; f.fillRect(0, (H - 10) * K, W * K, 10 * K);
       f.restore();
+      if (view.pane) drawPane(view.pane, pal);
       if (view.status) drawStatus(view.status, pal);
       bend();
     }
@@ -98,29 +120,43 @@
     // beansLit: the bean and its count bright for a moment, the one blink when beans come in
     // problems: every open problem, live, on a thin strip under the status line (Eugene's playtest, 2026-10-02), left to
     // right in the order they came: "L47 DOWN · L20 HOT", each kind in its tone, one being fixed dim. Null: not drawn.
-    function drawProblems(list, pal) {
+    // The fix feel (design.md section 5, "Surface and focus, decided", 23; 2026-10-11): a unit just back shows "L47 ok" in
+    // the ok green for a moment ({ unit, ok: true }), and the board cleared says "all units nominal" in the bright tone
+    // (strip.lit) before it dims; strip.note is a word from the system, dim, after the rest ("tab fills them.", once)
+    function drawProblems(list, pal, strip = {}) {
       const PF = 13, y = 41;
       f.font = `${PF}px ${FAMILY}`; f.shadowColor = pal.glow; f.shadowBlur = 5 * K;
       let x = PAD_X;
       const put = (t, color) => { f.fillStyle = color; f.fillText(t, x, y); x += f.measureText(t).width; };
-      if (!list.length) put('all units nominal', pal.dim);
+      const oks = list.filter(p => p.ok); list = list.filter(p => !p.ok);
+      oks.forEach((p, i) => { if (i) put('  ·  ', pal.dim); f.shadowColor = CLS.ok.color; put(p.unit + ' ok', CLS.ok.color); f.shadowColor = pal.glow; });
+      if (oks.length && list.length) put('  ·  ', pal.dim);
+      if (!list.length && !oks.length) { if (strip.lit) { f.shadowColor = '#d8ffe0'; f.shadowBlur = 9 * K; put('all units nominal', '#d8ffe0'); f.shadowColor = pal.glow; f.shadowBlur = 5 * K; } else put('all units nominal', pal.dim); }
       // a rack dropping packets says what is wrong and what fixes it, in a few words (Eugene's second playtest, 2026-10-05:
-      // LOSS alone left him stuck); short if the strip would run past the tube's edge
-      const hint = (p, long) => p.kind === 'LOSS' && !p.fixing ? (long ? `  dropping packets: ROUTE cart, route ${p.unit}` : `  route ${p.unit}`) : '';
+      // LOSS alone left him stuck); short if the strip would run past the tube's edge. A unit in pieces the same way (the
+      // cold playtest's dry run, 2026-10-11: STUCK named nothing, and the first one struck at 90 minutes); and out of memory
+      // (2026-10-11, step 8: "out of memory: HEAP cart, heap L33")
+      const hint = (p, long) => p.fixing ? '' : p.kind === 'LOSS' ? (long ? `  dropping packets: ROUTE cart, route ${p.unit}` : `  route ${p.unit}`)
+        : p.kind === 'STUCK' ? (long ? `  in pieces: DEFRAG cart, defrag ${p.unit}` : `  defrag ${p.unit}`)
+        : p.kind === 'OOM' ? (long ? `  out of memory: HEAP cart, heap ${p.unit}` : `  heap ${p.unit}`) : '';
       const width = long => list.reduce((s, p, i) => s + f.measureText((i ? '  ·  ' : '') + p.unit + ' ' + (p.fixing ? 'FIXING' : p.kind) + hint(p, long)).width, 0);
       const long = width(true) <= W - 2 * PAD_X;
       list.forEach((p, i) => {
         if (i) put('  ·  ', pal.dim);
         put(p.unit + ' ', p.fixing ? pal.dim : pal.text);
-        const st = CLS[{ DOWN: 'pdown', HOT: 'phot', STUCK: 'pstuck', LOSS: 'ploss' }[p.kind]] || {};
+        const st = CLS[{ DOWN: 'pdown', HOT: 'phot', STUCK: 'pstuck', LOSS: 'ploss', OOM: 'poom' }[p.kind]] || {};
         if (p.fixing) put('FIXING', pal.dim); else { f.shadowColor = st.glow || pal.glow; put(p.kind, st.color || pal.text); f.shadowColor = pal.glow; }
         if (hint(p, long)) put(hint(p, long), pal.dim);
       });
+      // (after the rest, if it fits before the tube's edge)
+      if (strip.note) { const n = '   ' + strip.note; if (x + f.measureText(n).width <= W - PAD_X) put(n, pal.dim); }
+      // a canister waiting in the receiver, until it is collected (the dry run: a stranger looked at the ceiling for it)
+      if (strip.tube) { const n = '   something in the tube.'; if (x + f.measureText(n).width <= W - PAD_X) put(n, pal.dim); }
     }
     // spurts: energy that just moved, [{ a, b, age }] (from a to b, age 0..1): drawn over the gauge where it moved, green
     // in, red out (the tube's ok green and the supervisor's red, the only colours it has besides the phosphor)
-    function drawStatus({ energy, beans, low, strikes = 0, mail = null, beansLit = false, problems = null, spurts = [] }, pal) {
-      if (problems) drawProblems(problems, pal);
+    function drawStatus({ energy, beans, low, strikes = 0, mail = null, beansLit = false, problems = null, strip = {}, spurts = [] }, pal) {
+      if (problems) drawProblems(problems, pal, strip);
       const SF = 15, y = 22;                            // font size and the line's centre, in design units
       f.font = `${SF}px ${FAMILY}`;
       const w = t => f.measureText(t).width;
@@ -142,12 +178,14 @@
       mailHit = null;
       if (mail) {
         const top = gy + .5, h = ch - 1, bright = unread > 0;
+        // (mail.pulse, 1..0..1: three or more unread, the envelope and its count breathe down to a third and back)
+        const breath = mail.pulse == null ? 1 : .35 + .65 * mail.pulse;
         f.save(); f.strokeStyle = bright ? pal.text : pal.dim; f.lineWidth = 1.5; f.lineJoin = 'round'; f.lineCap = 'round';
-        if (!bright) f.globalAlpha = .8;
+        f.globalAlpha = (bright ? 1 : .8) * breath;
         f.strokeRect(x + .75, top, ENV - 1.5, h);
         f.beginPath(); f.moveTo(x + 1.5, top + 1); f.lineTo(x + ENV / 2, top + h * .58); f.lineTo(x + ENV - 1.5, top + 1); f.stroke();
         f.restore();
-        if (mcount) { f.fillStyle = pal.text; f.fillText(mcount, x + ENV + 5, y); }
+        if (mcount) { f.save(); f.globalAlpha = breath; f.fillStyle = pal.text; f.fillText(mcount, x + ENV + 5, y); f.restore(); }
         mailHit = { x0: x - 10, x1: x + MS - GAP * 3 + 10, y0: gy - 10, y1: gy + ch + 10 };
         x += MS;
       }
@@ -189,13 +227,92 @@
       f.fillStyle = beansLit ? pal.text : pal.dim; f.fillText(count, x + BEAN + 5, y);
       f.font = `${FONT}px ${FAMILY}`;
     }
+    // ---- Glenn's pane. p: { n: 3 | 1, icon, who: { name }, mood, rows: [{ segs: [{ text, dim, mark }], time, dim }],
+    //      cursor: { row, col } | null, cursorOn }.
+    // (Arnold, 2026-10-11: the tag on every message broke the reading line.) His silhouette on the left over rows 1 and 2,
+    // and his nametag once, under it, as wide as it (the tag is his: a caption read as nobody); his lines start flush
+    // against them.
+    // At the end of each message, right-aligned and dim, the shift time it was said. A small ▸ in front of what he has asked
+    // for and is waiting on (mark: drawn, not a glyph, so every font has it). His cursor is the player's, blinking, in red.
+    // The silhouette: a rounded square in upstairs' red, its inside lit faintly red, a plain head and shoulders in the
+    // glass's own dark (Arnold's stills, sf-1: the frame's line and two fills, a circle and the top of an ellipse cut square
+    // by the frame, so nothing joins). It shows his mood without a face (mood): 'typing' brighter, 'quiet' dim, 'cooled'
+    // flat grey (the three minutes after a refusal), 'static' (night 3, the link down: drawn as quiet until step 10 draws
+    // it). Folded, there is no icon (at a row's height its head and shoulders would be under 6 px apart) and no name: his
+    // red line, its ▸ and its time.
+    const SUP = '#ffb4b4', SUPG = '#ff7a7a', GREY = '#9ea3b8';
+    const MOOD = {
+      typing: { ink: SUP, glow: SUPG, blur: 10, fill: 'rgba(255,157,157,.28)', line: 1, label: .62 },
+      quiet: { ink: SUP, glow: SUPG, blur: 3, fill: 'rgba(255,157,157,.10)', line: .55, label: .42 },
+      cooled: { ink: GREY, glow: 'transparent', blur: 0, fill: 'rgba(158,163,184,.10)', line: .6, label: .42 },
+    };
+    MOOD.static = MOOD.quiet;
+    function icon(x, y, sz, mood = 'quiet') {
+      const M = MOOD[mood] || MOOD.quiet;
+      const r = sz * .12, head = { cx: x + sz / 2, cy: y + sz * .33, r: sz * .18 }, sh = { cx: x + sz / 2, cy: y + sz * 1.04, rx: sz * .36, ry: sz * .38 };
+      const rr = () => { f.beginPath(); f.moveTo(x + r, y); f.arcTo(x + sz, y, x + sz, y + sz, r); f.arcTo(x + sz, y + sz, x, y + sz, r); f.arcTo(x, y + sz, x, y, r); f.arcTo(x, y, x + sz, y, r); f.closePath(); };
+      f.save();
+      rr(); f.shadowBlur = 0; f.fillStyle = M.fill; f.fill();
+      f.save(); rr(); f.clip();
+      f.fillStyle = '#0d1452';
+      f.beginPath(); f.arc(head.cx, head.cy, head.r, 0, Math.PI * 2); f.fill();
+      f.beginPath(); f.ellipse(sh.cx, sh.cy, sh.rx, sh.ry, 0, 0, Math.PI * 2); f.fill();
+      f.restore();
+      rr(); f.globalAlpha = M.line; f.strokeStyle = M.ink; f.shadowColor = M.glow; f.shadowBlur = M.blur; f.lineWidth = 1.5; f.lineJoin = 'round'; f.stroke();
+      f.restore();
+    }
+    // the ▸: a small solid triangle on the line's centre, a cell wide, a cell's gap after it
+    function mark(x, y, alpha) {
+      const h = FONT * .42, w = h * .82;
+      f.save(); f.globalAlpha = alpha; f.fillStyle = SUP; f.shadowColor = SUPG; f.shadowBlur = 6 * K;
+      f.beginPath(); f.moveTo(x + 1.5, y - h / 2); f.lineTo(x + 1.5 + w, y); f.lineTo(x + 1.5, y + h / 2); f.closePath(); f.fill();
+      f.restore();
+    }
+    function drawPane(p, pal) {
+      const x0 = PAD_X + (p.icon ? PANE.ICON * CW : 0), M = MOOD[p.mood] || MOOD.quiet;
+      if (p.icon) {
+        const sz = 2 * LH - 6;
+        icon(PAD_X, TOP + 3, sz, p.mood);
+        // his nametag, once (Arnold, 2026-10-11: the tag is his; on every message it broke the line, so it is a plate under
+        // the square now, as wide as it): inverse red, his name in the glass's blue, in the third row. Grey when he's cooled.
+        if (p.who?.name) {
+          const TF = 14, ty = TOP + 2 * LH + LH / 2 - 1, th = TF + 4;
+          f.save(); f.shadowBlur = 0; f.globalAlpha = p.mood === 'cooled' ? .8 : p.mood === 'typing' ? 1 : .85;
+          f.fillStyle = p.mood === 'cooled' ? GREY : '#ff9d9d'; f.fillRect(PAD_X, ty - th / 2, sz, th);
+          f.font = `${TF}px ${FAMILY}`; f.textAlign = 'center'; f.textBaseline = 'middle'; f.fillStyle = '#22308f';
+          f.fillText(p.who.name, PAD_X + sz / 2, ty + .5);
+          f.restore();
+        }
+      }
+      f.font = `${FONT}px ${FAMILY}`; f.textBaseline = 'middle';
+      p.rows.forEach((row, r) => {
+        const y = TOP + r * LH + LH / 2;
+        let x = x0;
+        for (const sg of row.segs) {
+          if (sg.mark) { mark(x, y, sg.dim ? .45 : 1); x += 2 * CW; continue; }
+          if (!sg.text) continue;
+          f.globalAlpha = sg.dim ? .45 : 1; f.fillStyle = SUP; f.shadowColor = SUPG; f.shadowBlur = 6 * K; f.fillText(sg.text, x, y);
+          x += [...sg.text].length * CW;
+        }
+        // the time it was said, right-aligned at the end of the message, dim
+        if (row.time) { f.globalAlpha = .34; f.fillStyle = SUP; f.shadowColor = SUPG; f.shadowBlur = 3 * K; f.fillText(row.time, W - PAD_X - row.time.length * CW, y); }
+        f.globalAlpha = 1;
+      });
+      // his cursor while he types: the player's own block, blinking with it, in his red, at the end of what has typed
+      if (p.cursor && p.cursorOn) { const x = x0 + p.cursor.col * CW, y = TOP + p.cursor.row * LH + LH / 2; f.shadowColor = SUPG; f.shadowBlur = 6 * K; f.fillStyle = SUP; f.fillRect(x, y - FONT * .55, FONT * .62, FONT * 1.05); }
+      // the rule between his rows and the work: the tube's dim ink, a hair, the width of the text
+      const ry = TOP + p.n * LH + PANE.GAP[p.n] / 2;
+      f.shadowBlur = 0; f.globalAlpha = .38; f.fillStyle = pal.dim; f.fillRect(PAD_X, ry - .5, W - 2 * PAD_X, 1); f.globalAlpha = 1;
+    }
     // A square grid over the text, for games that move in cells (snake): the text grid's cells are 2.4 times taller
     // than wide, so a game on them steps 10 across and 25 down and its pieces are slivers. field: { col, row (the
     // text cell of its top left corner), width (in text columns), cols, rows, cells: [[x, y, kind]] }; the grid's step
     // is one text row, and it is centred across the width. kind: head, body, food (a diamond), dead (a dead link: a small
     // cross, dim), port (the core port, open: a hollow square in the phosphor's green) or portShut (dim).
     function drawField(fd, pal) {
-      const step = Math.min(fd.width * CW / fd.cols, LH), x0 = PAD_X + fd.col * CW + (fd.width * CW - fd.cols * step) / 2, y0 = TOP + fd.row * LH;
+      // (height: the text rows it fills, when its rows are more than those: ROUTE's 11 in 10, under Glenn's folded row)
+      // (left: the grid from the field's left edge, not centred: HEAP's well, with its notes beside it)
+      const step = Math.min(fd.width * CW / fd.cols, fd.height ? fd.height * LH / fd.rows : LH), x0 = PAD_X + fd.col * CW + (fd.left ? 0 : (fd.width * CW - fd.cols * step) / 2), y0 = OFF + fd.row * LH;
       f.shadowColor = pal.glow; f.shadowBlur = 6 * K;
       for (const [x, y, kind] of fd.cells) {
         const cx = x0 + (x + .5) * step, cy = y0 + (y + .5) * step;
@@ -207,6 +324,11 @@
         if (kind === 'dead') {                           // a dead link: a small cross, dim
           const r = step * .22; f.save(); f.strokeStyle = pal.dim; f.globalAlpha = .7; f.lineWidth = 2; f.lineCap = 'round';
           f.beginPath(); f.moveTo(cx - r, cy - r); f.lineTo(cx + r, cy + r); f.moveTo(cx + r, cy - r); f.lineTo(cx - r, cy + r); f.stroke(); f.restore();
+          continue;
+        }
+        if (kind === 'free') {                           // a free cell of HEAP's well: a small dim dot, so the well reads
+          const r = Math.max(1, step * .07); f.save(); f.fillStyle = pal.dim; f.globalAlpha = .55; f.shadowBlur = 0;
+          f.fillRect(cx - r, cy - r, 2 * r, 2 * r); f.restore();
           continue;
         }
         if (kind === 'port' || kind === 'portShut') {    // the core port: a hollow square, lit when it opens
@@ -225,18 +347,85 @@
     // cell), ball: [x, y] | null, paddles: [[x, y, len]] }, in cells, fractions allowed. A paddle is a text cell wide, as
     // the block it was; the ball the size of the round glyph it was.
     function drawPong(fd, pal) {
-      const x0 = PAD_X + fd.col * CW, y0 = TOP + fd.row * LH;
+      // (rowStep: a court row's height, when its rows are more than the text rows it fills: Pong's 11 in 10)
+      const x0 = PAD_X + fd.col * CW, y0 = OFF + fd.row * LH, R = fd.rowStep || LH;
       f.shadowColor = pal.glow; f.shadowBlur = 6 * K; f.fillStyle = pal.text;
-      for (const [x, y, len] of fd.paddles) f.fillRect(x0 + x * CW + 1, y0 + y * LH + 2, CW - 2, len * LH - 4);
-      if (fd.ball) { f.beginPath(); f.arc(x0 + (fd.ball[0] + .5) * CW, y0 + (fd.ball[1] + .5) * LH, FONT * .3, 0, Math.PI * 2); f.fill(); }
+      for (const [x, y, len] of fd.paddles) f.fillRect(x0 + x * CW + 1, y0 + y * R + 2, CW - 2, len * R - 4);
+      if (fd.ball) { f.beginPath(); f.arc(x0 + (fd.ball[0] + .5) * CW, y0 + (fd.ball[1] + .5) * R, FONT * .3, 0, Math.PI * 2); f.fill(); }
+    }
+    // The start's close-up (Arnold, 2026-10-11; docs/proposals/start-camera-and-eyelids-2026-10-11.md): the tube filling the
+    // window, its glass dark, in the fall-asleep screen's lettering (#night-over: 30 px at the frame's 1080, #cfd6ff, a 10 px
+    // glow), sized so that on the window it is that screen's size: t.unit is the stage pixels a design unit spans at the
+    // close-up, so px(v) is v of the fall-asleep screen's pixels in design units. The name at twice its size, spaced; lines
+    // of a question (t.lead); the choices in a row, 64 px apart, in brackets at half strength, the chosen one inverse (that
+    // screen's hover); a dim line of how. Or t.box: the menu's rows (settings), centred at 22 px. Returns where the choices,
+    // or the box's rows, lie (design units), for the page's click.
+    let titleHits = [];
+    const INK = '#cfd6ff', GLOW = 'rgba(200, 210, 255, .45)';
+    function drawCloseUp(t, pal) {
+      const px = v => v / t.unit, cx = W / 2, hits = [];
+      f.save(); f.textBaseline = 'middle';
+      if (t.box) {
+        const fs = px(22), lh = fs * 1.32, cw = (f.font = `${fs}px ${FAMILY}`, f.measureText('M').width);
+        const cols = Math.max(...t.box.map(r => r.reduce((n, sg) => n + [...sg.text].length, 0)));
+        const x0 = cx - cols * cw / 2, y0 = H / 2 - t.box.length * lh / 2;
+        t.box.forEach((row, r) => {
+          const y = y0 + (r + .5) * lh; let x = x0;
+          for (const sg of row) {
+            const n = [...sg.text].length, cls = String(sg.cls || '');
+            if (cls.includes('dg-cur')) { f.shadowBlur = 0; f.fillStyle = INK; f.fillRect(x, y - lh / 2 + px(1), n * cw, lh - px(2)); f.fillStyle = '#22308f'; }
+            else { f.fillStyle = INK; f.globalAlpha = cls.includes('dim') ? .55 : 1; f.shadowColor = GLOW; f.shadowBlur = cls.includes('dim') ? 0 : px(10) * K; }
+            f.fillText(sg.text, x, y); f.globalAlpha = 1; x += n * cw;
+          }
+          hits.push({ x0, x1: x0 + cols * cw, y0: y - lh / 2, y1: y + lh / 2 });
+        });
+        f.restore(); return hits;
+      }
+      const fs = px(30), gap = px(18), lead = t.lead || [];
+      let y = H / 2 - px(60) - lead.length * fs * .75;
+      f.textAlign = 'center'; f.fillStyle = INK; f.shadowColor = GLOW; f.shadowBlur = px(10) * K;
+      f.font = `${px(60)}px ${FAMILY}`; f.fillText([...t.name].join(' '), cx, y);
+      y += px(30) + gap;
+      f.font = `${fs}px ${FAMILY}`;
+      for (const l of lead) { y += fs * .75; f.globalAlpha = l.dim ? .55 : 1; f.shadowBlur = l.dim ? 0 : px(10) * K; f.fillText(l.text, cx, y); f.globalAlpha = 1; y += fs * .75; }
+      y += px(24) + fs * .75;
+      const words = t.items.map(it => `[ ${it} ]`), pad = px(10), wid = words.map(w => f.measureText(w).width + 2 * pad);
+      let x = cx - (wid.reduce((a, b) => a + b, 0) + px(64) * (words.length - 1)) / 2;
+      f.textAlign = 'left';
+      t.items.forEach((it, i) => {
+        if (i === t.sel) { f.shadowBlur = 0; f.fillStyle = INK; f.fillRect(x, y - fs * .75, wid[i], fs * 1.5); f.fillStyle = '#22308f'; f.fillText(words[i], x + pad, y); }
+        else {
+          f.shadowColor = GLOW; f.shadowBlur = px(10) * K; f.fillStyle = INK;
+          f.globalAlpha = .5; f.fillText('[', x + pad, y); f.fillText(']', x + pad + f.measureText(`[ ${it} `).width, y);
+          f.globalAlpha = 1; f.fillText(it, x + pad + f.measureText('[ ').width, y);
+        }
+        hits.push({ x0: x, x1: x + wid[i], y0: y - fs * .75, y1: y + fs * .75 });
+        x += wid[i] + px(64);
+      });
+      if (t.hint) { f.font = `${px(22)}px ${FAMILY}`; f.textAlign = 'center'; f.globalAlpha = .55; f.shadowBlur = 0; f.fillText(t.hint, cx, y + fs * .75 + gap + px(22) * .75); f.globalAlpha = 1; }
+      f.restore();
+      return hits;
     }
     // the barrel: columns to the curved top and bottom, then rows to the curved sides (canvas pixels)
+    function setK(k) {
+      // (a page loaded in a hidden or zero-size window has no size yet to scale by: keep the resolution it has; NaN went
+      // through and the canvas threw on its gradient, the final sweep, 2026-10-11)
+      if (!Number.isFinite(k)) return false;
+      k = Math.max(K0, Math.min(12, Math.ceil(k)));
+      if (k === K) return false;
+      K = k;
+      canvas.width = flat.width = mid.width = W * K; canvas.height = flat.height = mid.height = H * K;
+      f.setTransform(K, 0, 0, K, 0, 0);
+      const rs = (a, n) => Array.from({ length: n }, (_, i) => { const x = i * a.length / n, j = Math.min(a.length - 2, Math.floor(x)), u = x - j; return (a[j] * (1 - u) + a[j + 1] * u) * K / K0; });
+      warp = K === K0 ? warp0 : { top: rs(warp0.top, W * K), bottom: rs(warp0.bottom, W * K), left: rs(warp0.left, H * K), right: rs(warp0.right, H * K) };
+      return true;
+    }
     function bend() {
       m.clearRect(0, 0, mid.width, mid.height);
       for (let x = 0; x < flat.width; x++) m.drawImage(flat, x, 0, 1, flat.height, x, warp.top[x], 1, flat.height + warp.bottom[x] - warp.top[x]);
       out.clearRect(0, 0, canvas.width, canvas.height);
       for (let y = 0; y < mid.height; y++) out.drawImage(mid, 0, y, mid.width, 1, warp.left[y], y, mid.width + warp.right[y] - warp.left[y], 1);
     }
-    return { paint, COLS, ROWS, CW, LH, TOP, PAD_X, mailHit: () => mailHit };
+    return { paint, layout, COLS, ROWS, CW, LH, TOP, PAD_X, PANE, W, H, mailHit: () => mailHit, titleHit: () => titleHits, setK, get K() { return K; } };
   };
 })();

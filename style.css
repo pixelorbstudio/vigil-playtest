@@ -3,6 +3,7 @@
   --ink: #2a2a2a;
   --term-text: #e9edff;
   --term-dim: #aab4ee;
+  --bars: #b4b4b4;              /* past the frame's 2560 (wider than about 21:9): the room's darkest grey, its line */
 }
 
 * { box-sizing: border-box; }
@@ -15,6 +16,8 @@ html, body {
   font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
   color: var(--ink);
 }
+/* wider than the frame: quiet bars at the sides (app.js fit() sets html.bars) */
+html.bars, html.bars body { background: var(--bars); }
 
 /* The stage is always 1440x1080 design units; JS scales it to fit. */
 #stage {
@@ -25,9 +28,10 @@ html, body {
   height: 1080px;
   transform-origin: 0 0;
   will-change: transform;
-  /* The drawing is Arnold's 1920 x 1080 frame; the game works in the 1440 in its middle (the frame's x 240..1680 is
-     stage x 0..1440). Clipped to the frame: top and bottom (looking down moves #look inside it), and 240 either side. */
-  clip-path: inset(0 -240px);
+  /* The drawing is Arnold's 2560 x 1080 frame (it was 1920 until 2026-10-11); the game works in the 1440 in its middle (the
+     frame's x 560..2000 is stage x 0..1440). Clipped to the frame: top and bottom (looking down moves #look inside it), and
+     560 either side. */
+  clip-path: inset(0 -560px);
 }
 
 /* the head: looking down to the desk slides everything up inside the frame */
@@ -46,12 +50,15 @@ html, body {
   height: 1080px;
 }
 
-/* the scene runs below the frame to the desk's drawer (looking down shows it), and 240 either side */
+/* the scene runs below the frame to the desk's drawer (looking down shows it), and 560 either side */
 /* Caveat (SIL OFL 1.1, assets/fonts/Caveat-OFL.txt): what is written on the polaroids' strips */
 @font-face { font-family: 'Caveat'; src: url('assets/fonts/caveat-latin-400-normal.woff2') format('woff2'); font-display: block; }
 /* the old operators' own hands on their letters (SIL OFL 1.1, assets/fonts): jk's, Nothing You Could Do; aw's, Indie Flower */
 @font-face { font-family: 'Nothing You Could Do'; src: url('assets/fonts/nothing-you-could-do-latin-400-normal.woff2') format('woff2'); font-display: block; }
 @font-face { font-family: 'Indie Flower'; src: url('assets/fonts/indie-flower-latin-400-normal.woff2') format('woff2'); font-display: block; }
+/* the login note that comes down at 04:44, in a hand nobody in the room has (SIL OFL 1.1, assets/fonts): Covered By Your
+   Grace, Arnold's pick (2026-10-11) */
+@font-face { font-family: 'Covered By Your Grace'; src: url('assets/fonts/covered-by-your-grace-latin-400-normal.woff2') format('woff2'); font-display: block; }
 
 #scene-holder {
   position: absolute;
@@ -61,8 +68,8 @@ html, body {
 }
 #scene-holder > svg {
   position: absolute;
-  top: 0; left: -240px;
-  width: 1920px;
+  top: 0; left: -560px;
+  width: 2560px;
   height: 2200px;
 }
 
@@ -201,13 +208,15 @@ html, body {
   font-size: 12px;
   letter-spacing: .04em;
   color: #7a7a7a;
+  pointer-events: none;      /* (a line, not a control: it never takes a click meant for the room behind it) */
 }
 #hint {
   transition: opacity .6s;
   animation: hint-pulse 1.6s ease-in-out infinite;
 }
 #hint.gone { opacity: 0; animation: none; }
-#build-note { position: fixed; z-index: 3; left: 16px; bottom: 14px; margin: 0; font-size: 12px; letter-spacing: .04em; color: #7a7a7a; }
+/* (top left: at the bottom it ran into the hint at 1280 wide and less; the dry run, 2026-10-11) */
+#build-note { position: fixed; z-index: 3; left: 16px; top: 12px; right: 16px; margin: 0; font-size: 12px; letter-spacing: .04em; color: #7a7a7a; pointer-events: none; }
 #build-note[hidden] { display: none; }
 @keyframes hint-pulse { 50% { opacity: .35; } }
 
@@ -219,18 +228,6 @@ html, body {
 #steam.puff .wisp { animation-duration: 1.6s; stroke-width: 2.8; }
 /* eyes on the mug: the screen goes soft while sipping */
 
-#mute, #hum, #export {
-  font: inherit;
-  color: inherit;
-  background: #fff;
-  border: 1px solid #cfcfcd;
-  border-radius: 999px;
-  padding: 5px 11px;
-  cursor: pointer;
-}
-#mute:hover, #hum:hover, #export:hover { border-color: #9a9a98; }
-#mute[aria-pressed="true"], #hum[aria-pressed="true"] { color: #b0b0ae; }
-#mute[aria-pressed="true"] { text-decoration: line-through; }
 
 @media (prefers-reduced-motion: reduce) {
   .led, .wisp, #term-tube, #hint, .power-led { animation: none !important; }
@@ -247,6 +244,12 @@ html, body {
 .led.dead { opacity: .12 !important; animation: none !important; }
 .led.ping { opacity: 1 !important; animation: none !important; }
 .led.ping { fill: #d8ffe0 !important; }
+/* the fix feel (2026-10-11): from the bright tone to its own green over 0.6 s */
+.led.easing { transition: fill .6s ease-out, opacity .6s ease-out; }
+/* the quiet's ominous moments (2026-10-11): one LED out of its pattern, two quick blinks then dark, over and over (a unit
+   in trouble keeps its own: those classes come later and win) */
+.led.odd { animation: led-odd 1.25s steps(1, end) infinite !important; }
+@keyframes led-odd { 0% { opacity: 1; } 9% { opacity: .1; } 18% { opacity: 1; } 27% { opacity: .1; } 100% { opacity: .1; } }
 .power-led.off { opacity: .12 !important; animation: none !important; }
 .power-led { transition: opacity .3s; }
 
@@ -329,11 +332,16 @@ html, body {
 
 
 /* a rack dropping packets (LOSS): its LEDs drop out and come back, each on its own beat, as the traffic falls through */
-.led.dropping:not(.down):not(.hot):not(.stuck):not(.rebooting) { animation: led-drop 1.7s steps(1, end) var(--drop, 0s) infinite !important; }
+.led.dropping:not(.down):not(.hot):not(.stuck):not(.rebooting):not(.oom) { animation: led-drop 1.7s steps(1, end) var(--drop, 0s) infinite !important; }
 @keyframes led-drop { 0% { opacity: 1; } 18% { opacity: .08; } 26% { opacity: 1; } 61% { opacity: .08; } 66% { opacity: 1; } }
 
 /* a stuck unit's LED: steady amber */
 .led.stuck { fill: #F2C46B !important; animation: none !important; }
+
+/* a unit out of memory (OOM, 2026-10-11): it answers but nothing finishes, so its green stops flickering and holds steady,
+   and every 3 s it dips amber for 0.4 s (swapping). No other kind looks like it. */
+.led.oom { opacity: 1 !important; animation: led-oom 3s linear infinite !important; }
+@keyframes led-oom { 0%, 86.6% { fill: #9FD4A8; } 86.7%, 100% { fill: #F2C46B; } }
 
 /* the terminal is drawn on a canvas (crt.js): the text, cursor and status line, bent to the glass */
 #term-canvas { position: absolute; inset: 0; width: 1320px; height: 826px; pointer-events: auto; }
@@ -344,7 +352,7 @@ body.sipping #terminal { filter: blur(1.4px); }
 /* a lost night: the room goes dark and stays dark; what happened and two choices, in the terminal's lettering,
    glowing faintly in the dark as the tube's phosphor does */
 #night-over {
-  position: absolute; inset: 0 -240px; z-index: 50;
+  position: absolute; inset: 0 -560px; z-index: 50;
   display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 18px;
   font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace; font-size: 30px; color: #cfd6ff;
   text-shadow: 0 0 10px rgba(200, 210, 255, .45);
@@ -352,6 +360,8 @@ body.sipping #terminal { filter: blur(1.4px); }
   opacity: 0; transition: opacity 1.2s ease;
 }
 #night-over.shown { opacity: 1; }
+/* the eyes shut under it (app.js eyes.cover): the dark is theirs, opaque, the room not seen at all */
+#night-over.shut { background: #040406; opacity: 1; transition: none; }
 #night-over[hidden] { display: none; }
 #night-over p { margin: 0; text-align: center; white-space: pre-line; line-height: 1.5; }
 #no-choices { display: flex; gap: 64px; margin-top: 24px !important; }
@@ -368,7 +378,7 @@ body.sipping #terminal { filter: blur(1.4px); }
 #look.dark { filter: brightness(.06) !important; transition: filter 1.8s ease-in !important; }
 /* the whole page goes dark with the room, not just the frame */
 body.lost { background: #040406 !important; transition: background 1.8s ease-in; }
-body.lost > :not(#stage) { opacity: .15; transition: opacity 1.8s ease-in; }
+body.lost > :not(#stage):not(#eyelids) { opacity: .15; transition: opacity 1.8s ease-in; }
 
 /* 04:44 (design.md section 5, night 1's climax): the room stops. The steam holds where it is, mid-rise, until it goes on. */
 #steam.still .wisp { animation-play-state: paused !important; }
@@ -376,4 +386,21 @@ body.lost > :not(#stage) { opacity: .15; transition: opacity 1.8s ease-in; }
 /* the blink (design.md section 5, the end of a clocked-out night 1; Arnold, Q12): the room is not drawn for a beat, black
    behind it so the page's near-white never shows; no filter, no fade */
 body.blink { background: #000 !important; transition: none !important; }
+/* the first sleep (app.js fallAsleep): as the eyes go, the steady LEDs swim, each slowly fading and coming back on its own
+   clock; the trouble states keep theirs (their rules are !important) */
+body.drowsy .led.steady { animation: led-swim 2.8s ease-in-out var(--delay) infinite; }
+@keyframes led-swim { 0%, 100% { opacity: 1; } 50% { opacity: .3; } }
 body.blink #look, body.blink #hud, body.blink #build-note { visibility: hidden !important; }
+
+/* the start (app.js, the start): black behind the close-up until the camera has settled, the page's own lines hidden; past
+   the frame's 2560 the bars are black too */
+body.title { background: #000 !important; }
+body.title #hud, body.title #build-note { visibility: hidden !important; }
+
+/* the start's pull-back (app.js, the start): the raster comes up in a moment as the glass warms (the knob's warm-up, brief) */
+#terminal.warm-brief #term-tube { animation: warm-brief .45s ease-out; }
+@keyframes warm-brief {
+  0%   { transform: scaleY(.02); opacity: 0; }
+  45%  { transform: scaleY(1.02); opacity: .85; }
+  100% { transform: none; opacity: 1; }
+}

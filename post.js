@@ -47,8 +47,10 @@
   }
   function lensFrom(svg) {
     const A = fitCubic(edgeRun(svg, 'rack-left', [360, 60], [219, 1008])), C = fitCubic(edgeRun(svg, 'rack-left', [-37, 110], [-247, 925]));
-    // the desk's back edge (Vector_1616), its lowest point every 4 px across: a curve y(x) in even powers
-    const inv = svg.getScreenCTM().inverse(), p = svg.querySelector('#Vector_1616'), m = p.getScreenCTM(), L = p.getTotalLength(), bins = {};
+    // the desk's back edge (the desk's first path, its fill: Vector_1616 in the 1920 frame, Vector_3675 in the 2560, the same
+    // curve to 0.01 px), its lowest point every 4 px across: a curve y(x) in even powers, fitted over the 1920 frame's width
+    // as it always was (so the tube stands where it stood)
+    const inv = svg.getScreenCTM().inverse(), p = svg.querySelector('#desk path'), m = p.getScreenCTM(), L = p.getTotalLength(), bins = {};
     for (let i = 0; i <= 6000; i++) { const q = p.getPointAtLength(L * i / 6000), s = new DOMPoint(q.x, q.y).matrixTransform(m).matrixTransform(inv); if (s.y > 880) continue; const k = Math.round(s.x / 4); if (!(k in bins) || s.y > bins[k]) bins[k] = s.y; }
     const pts = Object.keys(bins).map(Number).sort((a, b) => a - b).map(k => [k * 4, bins[k]]).filter(([x]) => x > -300 && x < 1740);
     const M = Array.from({ length: 4 }, () => new Array(5).fill(0));
@@ -508,7 +510,7 @@
     const project = p => { const q = st.proj(p), r = flat(p); return [q[0] + (r[0] - q[0]) * near, q[1] + (r[1] - q[1]) * near + dy * near]; };
     const k0 = flat(pose.C), k1 = flat(V3.add(pose.C, pose.A)), pxmm = Math.hypot(k1[0] - k0[0], k1[1] - k0[1]);
     const inReceiver = false;
-    return { pose, project, inReceiver, near, pxmm, svg: (lid, what, aw = false) => pxmm < 1.4 ? window.delivery.far(pose, project, { aw }) : window.delivery.held(lid > Math.PI / 3 ? what : 'empty', pose, project, lid, { aw }) };
+    return { pose, project, inReceiver, near, pxmm, svg: (lid, what, aw = false, roll = null) => pxmm < 1.4 ? window.delivery.far(pose, project, { aw }) : window.delivery.held(lid > Math.PI / 3 ? what : 'empty', pose, project, lid, { aw, roll }) };
   }
 
   /* ---- the flow (Arnold, 2026-10-05: one click on the landed canister brings it all up to you). What the page plays and
@@ -551,12 +553,15 @@
     take(st, empty = false) {
       const la = lidAt(st), open = la + T.lid, flag = t => flagDown(clamp01(t / T.flagDown));
       const lidT = t => t < la ? 0 : t < open ? springOpen((t - la) / T.lid) : LID_OPEN;
-      const up = (t, what) => ({ flag: flag(t), fly: { s: easeIO(clamp01(t / T.lift)), toHands: true, lid: lidT(t), what } });
+      const up = (t, what, roll = null) => ({ flag: flag(t), fly: { s: easeIO(clamp01(t / T.lift)), toHands: true, lid: lidT(t), what, roll } });
       if (!empty) {
         const t1 = Math.max(T.lift, open) + T.beat;
+        // the roll slides out of the mouth from the moment the lid is upright to the slip's start (delivery.js rollOut)
+        let up90 = la; while (up90 < t1 && lidT(up90) < Math.PI / 2) up90 += 2;
+        const roll = t => clamp01((t - up90) / Math.max(1, t1 - up90));
         return { ms: t1 + T.slip, events: [[la, 'open']], slipAt: t1,
           at: t => {
-            if (t < t1) return up(t, 'slip');
+            if (t < t1) return up(t, 'slip', roll(t));
             const s = easeIO(clamp01((t - t1) / T.slip)), c = canBackAt(s);
             return { flag: 0, fly: { s: c, toHands: false, lid: LID_OPEN * (1 - c), what: 'empty' }, slip: s };
           } };
@@ -589,7 +594,7 @@
     if (state.canH != null) inRec = window.delivery.far(receiverPose(st, SZ.rec.floor + state.canH), st.proj, { aw });
     if (state.fly) {
       const f = canFlight(st, state.fly.s, state.fly.toHands, dy);
-      near = f.near; if (f.inReceiver) inRec = f.svg(0, 'empty', aw); else can = f.svg(state.fly.lid, state.fly.what, aw);
+      near = f.near; if (f.inReceiver) inRec = f.svg(0, 'empty', aw); else can = f.svg(state.fly.lid, state.fly.what, aw, state.fly.roll ?? null);
     }
     if (state.slip != null) slip = slipSvg(state.slip, print, dy);
     return { inRec, can, slip, flag: flag(st, state.flag || 0), near };
@@ -671,7 +676,11 @@
       const id = 'slipflat' + Math.random().toString(36).slice(2, 8);
       svg += `<polygon points="${fmt(flat)}" fill="${PAPER_TONE.front[0]}"/>` + (print ? `<clipPath id="${id}"><polygon points="${fmt(flat)}"/></clipPath><g clip-path="url(#${id})"><g transform="matrix(${m})">${print}</g></g>` : '');
       // its outline: the left edge, and the top and bottom edges as far as the curl (where it goes on, on its tangent)
-      const outline = [...(edgeAt[Y0] ? run([xf, Y0], [0, Y0], dens([xf, Y0], [0, Y0])) : []), ...run([0, Y0], [0, W], dens([0, Y0], [0, W])).slice(edgeAt[Y0] ? 1 : 0), ...(edgeAt[W] ? run([0, W], [xf, W], dens([0, W], [xf, W])).slice(1) : [])];
+      // (unrolled to its end, nothing curls on: its right edge is the flat part's own, where the curl's end line came to.
+      // Playtest round 4, 2026-10-10: left out, the held slip lost its right edge's line for its last 5% and got it back
+      // from the page's held slip, a pop tube-audit flagged)
+      const whole = left < 1e-9, closing = whole && edgeAt[Y0] && edgeAt[W] ? run([xf, W], [xf, Y0], dens([xf, W], [xf, Y0])).slice(1) : [];
+      const outline = [...(edgeAt[Y0] ? run([xf, Y0], [0, Y0], dens([xf, Y0], [0, Y0])) : []), ...run([0, Y0], [0, W], dens([0, Y0], [0, W])).slice(edgeAt[Y0] ? 1 : 0), ...(edgeAt[W] ? run([0, W], [xf, W], dens([0, W], [xf, W])).slice(1) : []), ...closing];
       svg += `<path d="${pathOf(outline)}" fill="none" ${INK}/>`;
     }
     // while the roll is closed, its end turned toward you is the paper's turns seen end on: a disc in the end's tone and a

@@ -1,12 +1,13 @@
 /* shift.js — the night shift: the clock, the incidents, uptime, and the operator's energy. Pure: it knows nothing
    about the page, so shift-audit.js can run whole nights in a second and check the pacing.
 
-   23:00 to 05:30 is 390 shift minutes over ten real minutes (about 39 shift seconds a real second).
+   23:00 to 05:30 is 390 shift minutes over the shift's real minutes (SHIFTS: 22, 20, 26 and 28).
    Incidents only happen on units whose LED the player can see, so every alert shows in the room:
      DOWN  not responding, LED dark.       Fixed by `reboot`.
      HOT   running hot, LED pulses amber.  Fixed by `reroute`. Left alone for a shift hour it goes DOWN.
      STUCK fragmented, LED steady amber.   A reboot won't hold; only the DEFRAG cartridge fixes it.
      LOSS  a whole rack dropping packets.  Only the ROUTE cartridge fixes it.
+     OOM   out of memory, stalled.         Only the HEAP cartridge fixes it (from shift 2).
    Difficulty is earned, not scheduled (Eugene's playtest, 2026-10-02; design.md, "The player is always in control"):
    the kinds of trouble arrive by mastery, one at a time (DOWN, then HOT after clean DOWN fixes, then STUCK once DEFRAG
    is in the drawer, then LOSS once ROUTE is), each first one alone until it is fixed; and the pace follows the player
@@ -35,8 +36,13 @@
      minutes after its cartridge is handed over, as the night's teaching game (a slow player rarely makes clean fixes, so
      the gate kept DEFRAG and ROUTE from them). Like any first of a kind it comes alone, after the night's first trouble,
      and waits for a clear board and the quiet. Mastery still decides when the kind joins the night's mix after that.
-     Grace: the night's first problem, and the first of each kind, comes alone: nothing new until it is fixed. */
-  const MASTERY = { order: ['DOWN', 'HOT', 'STUCK', 'LOSS'], needs: { STUCK: 'DEFRAG', LOSS: 'ROUTE' }, need: [3, 1, 1], kindNeed: { LOSS: 1 }, after: 10 };
+     Grace: the night's first problem, and the first of each kind, comes alone: nothing new until it is fixed, or until it
+     has stood GRACE.stand shift minutes with nobody playing its game (the simulation report's Rerun 2; Arnold, 2026-10-10:
+     a first STUCK left open held the night from 00:48 to 04:52). Then DOWN and HOT, of the kinds already met, come again as
+     usual around it; it stays open, the first of its kind, for its own teaching game, and a lesson due meanwhile waits for
+     the board to clear as before. */
+  const GRACE = { stand: 8 };
+  const MASTERY = { order: ['DOWN', 'HOT', 'STUCK', 'LOSS', 'OOM'], needs: { STUCK: 'DEFRAG', LOSS: 'ROUTE', OOM: 'HEAP' }, need: [3, 1, 1], kindNeed: { LOSS: 1, OOM: 1 }, after: 10 };
   /* The pace follows the player (flow): a quick clean fix (inside `quick` shift minutes of the alert, about 80 real
      seconds) brings the next trouble a little sooner, a clean but slow one leaves the pace where it is, and a strike,
      an escalation or a lost game eases it off. Each problem left open stretches the gap by `open`. The gap is `base` to
@@ -63,17 +69,18 @@
   // doesn't count. Three and you are relieved, at any hour.
   // The cartridges in the order the story hands them over, spread across the three nights (decided with Arnold
   // 2026-09-30: each night a stage with new games in it). A night starts with what the nights before gave you (you
-  // know them now) and hands over its own in turn: night 1 DEFRAG then ROUTE, night 2 COOLANT then HEAP, night 3
-  // POWER then the finale (each joins as it is built). A first win on one reveals the next (the fast path; Pong's
+  // know them now) and hands over its own in turn: night 1 DEFRAG then ROUTE, night 2 HEAP, night 3 FIREWALL and POWER
+  // then the finale (each joins as it is built; COOLANT was cut, 2026-10-10). A first win on one reveals the next (the fast path; Pong's
   // win reveals the night's first); failing that, from an hour after the last one turned up, half an hour of calm
   // racks brings it (the slow path), and at an hour and a half it comes on a timer, so nobody is left without it.
-  const ORDER = ['PONG', 'DEFRAG', 'ROUTE', 'COOLANT', 'HEAP', 'POWER'];
+  // (2026-10-11: FIREWALL is Glenn's gift, not the chain's: section 5, "The unlocks tell the story, decided")
+  const ORDER = ['PONG', 'DEFRAG', 'ROUTE', 'HEAP', 'POWER'];
   // first: when the first trouble comes (shift minutes; QUIET otherwise). quiet: windows with no new trouble, held
   // for the story (decided 2026-09-30: a drip, with quiet around story moments): 04:44 and the minute before it.
   // Night 1 starts at 23:10 (Arnold, 2026-09-30: the first five real minutes were 60-100% idle).
   const NIGHTS = [
     { start: ['PONG'], chain: ['DEFRAG', 'ROUTE'], first: 10, lesson: 10, quiet: [[318, 352]], deliveries: { streaks: true, bag: true } },
-    { start: ['PONG', 'DEFRAG', 'ROUTE'], chain: [], quiet: [[318, 352]], deliveries: { streaks: true, bag: true } },          // COOLANT, HEAP when built (its empty canister cut: Arnold, 2026-10-06)
+    { start: ['PONG', 'DEFRAG', 'ROUTE', 'HEAP'], chain: [], quiet: [[318, 352]], deliveries: { streaks: true, bag: true } },          // FIREWALL when built (its empty canister cut: Arnold, 2026-10-06)
     // night 3 starts mid-crisis (decided 2026-09-30): the night never ended, so you log in tired (energy 45%; 60% since
     // Arnold, 2026-10-06: energy carries over between nights but a night never starts under 60%) to a unit
     // down, one stuck and a rack dropping packets, all just broken (2026-10-02, the player always in control: they used
@@ -81,7 +88,7 @@
     // (without it nobody lost night 3 before 03:00): a careful player relieved about a quarter of the time before then.
     // 45%, not 35%: at 35% the keys lagged in the first minute of triage (the controls fighting you, not the night);
     // the losses before 03:00 are all strikes, so it costs the night nothing
-    { start: ['PONG', 'DEFRAG', 'ROUTE'], chain: [], crisis: { energy: .6, open: [['DOWN', 0], ['STUCK', 0], ['LOSS', 0]] }, first: 0, deliveries: { streaks: false, bag: false } },   // POWER when built
+    { start: ['PONG', 'DEFRAG', 'ROUTE', 'HEAP'], chain: [], crisis: { energy: .6, open: [['DOWN', 0], ['STUCK', 0], ['LOSS', 0]] }, first: 0, deliveries: { streaks: false, bag: false } },   // POWER when built
   ];
   const SLOW = { wait: 60, calm: 30, latest: 90 };
   // Deliveries (design.md, "Deliveries"; Arnold, 2026-10-02). Coffee is earned by working well and comes down the tube
@@ -94,7 +101,11 @@
   // cartridge trouble: the first of a kind half an hour after its cartridge turns up (or at the start, for one you
   // start the night with), then a share of the trouble. STUCK is fixed by DEFRAG, LOSS (a rack dropping packets)
   // by ROUTE. The rest is DOWN and HOT, the filler between games.
-  const TROUBLE = { STUCK: { cart: 'DEFRAG', share: .22 }, LOSS: { cart: 'ROUTE', share: .22 } };
+  // OOM (a unit out of memory) by HEAP, from shift 2 (2026-10-11): once it has joined the night, STUCK, LOSS and OOM are
+  // about 15% each, so cartridge trouble stays under half (section 5, "The last three cartridges, decided")
+  const TROUBLE = { STUCK: { cart: 'DEFRAG', share: .22 }, LOSS: { cart: 'ROUTE', share: .22 }, OOM: { cart: 'HEAP', share: .15 } };
+  const SHARE_WITH_OOM = .15;
+  const CART_KINDS = { STUCK: 'defrag', LOSS: 'route', OOM: 'heap' };   // cartridge trouble, by its fix's verb
   const FIRST_AFTER = 30;                           // a cartridge you start the night with counts as found this long ago
   const DIAL_FROM = 90;                             // DEFRAG's dial starts turning at 00:30
   // (play is spent while the game runs, over its minute, not at its start: the bar visibly ticks down faster while you
@@ -103,7 +114,8 @@
   // a unit whose game was just lost waits a real minute before its game can be played again (the simulation report,
   // 2026-10-06, item 4: the worst unit took 7 to 9 tries a night, each one another loss); its strike clock doesn't run
   // meanwhile, since the wait is the game's, not the player's
-  const COOL_MS = 60000;
+  // (DEFRAG's is half that: playtest round 4, 2026-10-10, a minute after a lost DEFRAG read as the game gone; ROUTE's stays)
+  const COOL_MS = 60000, COOL = { STUCK: 30000 };
 
   /* How hard the night is (decided with Arnold 2026-09-29: it should be hard, and ramp up night after night the
      way the story does). A returning player knows the room and fixes things faster, so each night is tuned harder
@@ -128,12 +140,48 @@
     { pace: 1.9, open: 4, strike: { after: 55, again: 70, max: 3 }, hot: 45, drain: 1.05, beans: 1, dial: { ahead: 15, faster: .25 } },
   ];
 
-  // carry: what the night before left (Arnold, 2026-10-06; the page keeps it from 05:30): { energy, beans }. The beans carry
-  // as they are; the energy too, but a night never starts under FLOOR. Without it a night starts rested, with LEVELS' beans.
+  /* The four shifts (Arnold, 2026-10-10; design.md section 5, "Surface and focus, decided", 1): night 1, night 1 again,
+     night 2, night 3, at 22, 20, 26 and 28 real minutes. A shift plays its night's LEVELS and NIGHTS; the clock is the
+     night's (23:00 to 05:30 in shift minutes, so the trouble, the strikes and the beats keep their shift times and only
+     the real minutes change). The repeat (again) is the same night: it starts from where the first one ended (the pace,
+     the kinds of trouble met, the cartridges handed over: carry), its first trouble at 23:03. */
+  /* The pressure ramp (design.md section 5, "Surface and focus, decided", 6 and 10; playtest round 4, 4; 2026-10-11, step 4):
+     on shift 1 nothing drains from the login until the first fix lands (teaching is free); on night 1 (both its shifts) the
+     most problems open at once follow the pace the player has earned (flow): open 2 at flow 0.6 to 4 at 1.5, so a good
+     player is pushed and a struggling one never is. The drain stays flat at 1.05 (Arnold, 2026-10-11: ramping it with the
+     flow pushed the slow and idle players, whose flow climbs while they run out of energy; it ramped 0.95 to 1.25). The
+     repeat starts at the flow shift 1 ended on (carry), so at its dial. Nights 2 and 3 keep LEVELS' own. */
+  const RAMP = { flow: [.6, 1.5], drain: 1.05, open: [2, 4] };
+  const SHIFTS = [
+    { level: 1, min: 22 },
+    // HEAP is the repeat's (Arnold, 2026-10-11: compliance buys tools): obeying Glenn's clash order hands it over at once
+    // ("Operator cooperation noted!"); refusing one (letting it stand) still brings it `after` shift minutes on, as a
+    // "Scheduled release."; with no clash by `latest` (03:00, the end of the first clash window, 01:50 to 03:00), on a timer. Never a gate, and
+    // never by a cartridge win (that would buy it without the compliance). Its first OOM comes NIGHTS[0].lesson shift
+    // minutes after the hand-over, alone, as its teaching game.
+    { level: 1, min: 20, again: true, first: 3, offer: { cart: 'HEAP', after: 15, latest: 240 } },
+    { level: 2, min: 26 },
+    { level: 3, min: 28 },
+  ];
+  // the shift a night is first played on (?level=2 in the page, the audits' levels)
+  const shiftOf = level => SHIFTS.findIndex(S => S.level === level) + 1;
+  window.SHIFTS = SHIFTS;
+  // carry: what the night before left (Arnold, 2026-10-06; the page keeps it from 05:30): { energy, beans }, and for the
+  // repeat { flow, kinds, met, carts } too. The beans carry as they are; the energy too, but a night never starts under FLOOR.
+  // Without it a night starts rested, with LEVELS' beans.
   const FLOOR = .6;
-  window.createShift = function ({ units, racks = ['rack-left', 'rack-right'], realMs = 900000, rand = Math.random, level = 1, carry = null }) {
-    const L = LEVELS[Math.max(1, Math.min(LEVELS.length, level)) - 1], STRIKE = L.strike;
-    const NIGHT = NIGHTS[LEVELS.indexOf(L)];
+  window.createShift = function ({ units, racks = ['rack-left', 'rack-right'], realMs = null, rand = Math.random, level = 1, shift: shiftNo = null, carry = null }) {
+    shiftNo = Math.max(1, Math.min(SHIFTS.length, shiftNo || shiftOf(Math.max(1, Math.min(LEVELS.length, level)))));
+    const SH = SHIFTS[shiftNo - 1];
+    realMs = realMs || SH.min * 60000;
+    const L = LEVELS[SH.level - 1], STRIKE = L.strike;
+    const N0 = NIGHTS[SH.level - 1];
+    // the repeat: the cartridges handed over the first time are the night's from its start, and its chain goes on from there
+    const had = SH.again && carry && Array.isArray(carry.carts) ? carry.carts.filter(c => ORDER.includes(c)) : [];
+    const NIGHT = { ...N0, ...(SH.first != null ? { first: SH.first } : {}),
+      start: [...new Set([...N0.start, ...had])], chain: N0.chain.filter(c => !had.includes(c)) };
+    // the shift's own offer (HEAP on the repeat), handed over by compliance or later (offer, below)
+    const OFFER = SH.offer && !NIGHT.start.includes(SH.offer.cart) ? SH.offer : null;
     const perMs = SPAN / realMs;                    // shift minutes per real millisecond
     const s = {
       t: 0,                                         // shift minutes since 23:00
@@ -150,6 +198,7 @@
       kinds: new Set(['DOWN']), cleanSince: 0,      // mastery: the kinds of trouble that come tonight; clean fixes since the last one joined
       flow: FLOW.start, holds: new Set(),           // the pace the player has earned; why the energy isn't draining now (Glenn teaching, the mail)
       stats: { incidents: 0, fixed: 0, escalated: 0, downMin: 0, longest: { unit: null, min: 0 } },
+      offerAt: Infinity,                            // the shift's offer, once refused: when it comes anyway
     };
     // a night that starts mid-crisis: its energy, and what is already broken (shown by the page at login)
     const initial = [];
@@ -166,8 +215,21 @@
     const NEED = MASTERY.need[Math.min(LEVELS.indexOf(L), MASTERY.need.length - 1)];
     // a night that starts mid-crisis already has what it opened with
     for (const i of s.open.values()) s.kinds.add(i.kind);
+    // the repeat starts at the pace the first one ended on, with the trouble already met (met: no first-of-a-kind grace,
+    // no lesson for it again)
+    if (SH.again && carry) {
+      if (Number.isFinite(+carry.flow)) s.flow = Math.max(FLOW.min, Math.min(FLOW.max, +carry.flow));
+      for (const k of carry.kinds || []) if (MASTERY.order.includes(k)) { s.kinds.add(k); s.seen.add(k); }
+      for (const k of carry.met || []) if (MASTERY.order.includes(k)) s.seen.add(k);   // (met by a lesson, not yet in the mix: mastery adds it)
+    }
     // the next new trouble comes a gap after the crisis you log in to, not on top of it (it read as a timing accident)
     if (NIGHT.crisis) s.nextAt = gap();
+    // the ramp (RAMP): night 1's most open by the pace earned, its drain flat; the other nights', their own
+    const ramp = () => Math.max(0, Math.min(1, (s.flow - RAMP.flow[0]) / (RAMP.flow[1] - RAMP.flow[0])));
+    const drainNow = () => SH.level === 1 ? RAMP.drain : L.drain;
+    const openNow = () => SH.level === 1 ? Math.round(RAMP.open[0] + (RAMP.open[1] - RAMP.open[0]) * ramp()) : L.open;
+    // shift 1: nothing drains until the first fix lands
+    const freeStart = () => shiftNo === 1 && !s.stats.fixed;
     // the gap to the next incident, in shift minutes: FLOW.base to base + spread real seconds (in a fifteen-minute night),
     // sooner as the player earns it (flow), longer for every problem already open. Fixed in shift time, so a shorter
     // test night has the same incidents.
@@ -185,8 +247,11 @@
       if (cart && !(s.handed.has(cart) && s.t >= s.handed.get(cart) + MASTERY.after)) return;
       s.kinds.add(next); s.cleanSince = 0;
     }
-    // grace: the night's first problem, and the first of each kind, come alone
-    const grace = () => [...s.open.values()].some(i => i.first) || (!!NIGHT.crisis && !s.stats.fixed);   // night 3: nothing new until you fix something
+    // grace: the night's first problem, and the first of each kind, come alone, while they are new or being played
+    const holding = i => i.first && (i.fixing || s.t - i.since < GRACE.stand);
+    const grace = () => [...s.open.values()].some(holding) || (!!NIGHT.crisis && !s.stats.fixed);   // night 3: nothing new until you fix something
+    // a first of a kind left standing past its grace: the night goes on around it, with the trouble already met
+    const outstayed = () => [...s.open.values()].some(i => i.first && !holding(i));
     function endOutage(unit, inc) {
       if (inc.downSince === null) return;
       const min = s.t - inc.downSince;
@@ -206,7 +271,7 @@
       // energy at zero: you fall asleep at the desk, and that is the night (decided 2026-09-29)
       if (!s.holds.size) {                            // held: Glenn teaching, the mail open (Eugene, 2026-10-02)
         s.idle += dt;
-        s.energy = Math.max(0, s.energy - dt * ENERGY.perMin * L.drain * drainFactor());
+        if (!freeStart()) s.energy = Math.max(0, s.energy - dt * ENERGY.perMin * drainNow() * drainFactor());
       }
       // a cartridge game running: its play cost, spent over a real minute of play
       for (const [unit, left] of s.playing) {
@@ -214,13 +279,15 @@
         s.energy = Math.max(0, s.energy - take); s.playing.set(unit, left - take);
       }
       if (s.energy <= 0) { end('relieved', events, 'asleep'); return; }
+      const teaching = s.holds.has('teach');
       for (const [unit, inc] of s.open) {
         if (inc.downSince !== null) s.stats.downMin += dt;
+        if (teaching) continue;
         if (inc.downSince !== null && !inc.fixing && !s.over && !(inc.coolUntil > s.t)) {
           inc.idle += dt;
           if (inc.idle >= STRIKE.after + inc.struck * STRIKE.again) {
             inc.struck++; s.strikes++; s.streak = 0; ease();
-            events.push({ type: 'strike', unit, n: s.strikes, min: Math.round(s.t - inc.downSince) });
+            events.push({ type: 'strike', unit, kind: inc.kind, n: s.strikes, min: Math.round(s.t - inc.downSince) });
             if (s.strikes >= STRIKE.max) end('relieved', events, 'strikes');
           }
         }
@@ -231,13 +298,16 @@
       }
       // held for the story: the night's quiet windows, and while the page says so (Glenn typing)
       // (and while the page protects a Pong match: the chase for M.'s score, up to three a night, Arnold 2026-10-05)
-      const hushed = s.t < s.hushUntil || s.protect || (NIGHT.quiet || []).some(([a, b]) => s.t >= a && s.t < b);
+      const hushed = s.t < s.hushUntil || s.protect || teaching || (NIGHT.quiet || []).some(([a, b]) => s.t >= a && s.t < b);
       learn();
+      // a first of a kind just past its grace: the next trouble comes a gap from now, as after any other (not at once)
+      for (const i of s.open.values()) if (i.first && !i.outstayed && !holding(i)) { i.outstayed = true; s.nextAt = Math.max(s.nextAt, s.t + gap()); }
       // night 1's lessons: the first STUCK or LOSS, `lesson` minutes after its cartridge's hand-over, whatever the gate says.
       // Once one is due nothing else new starts, so the board clears for it (a slow player's is rarely clear by itself)
       const lesson = NIGHT.lesson != null && s.stats.incidents > 0 && s.t < SPAN
         && MASTERY.order.find(k => MASTERY.needs[k] && !s.seen.has(k) && s.handed.has(MASTERY.needs[k]) && s.t >= s.handed.get(MASTERY.needs[k]) + NIGHT.lesson);
-      if (lesson) {
+      // (a first of a kind outstaying its grace doesn't hold the night for a lesson behind it: the night goes on, below)
+      if (lesson && !outstayed()) {
         if (!s.open.size && !hushed) {
           const pool = lesson === 'LOSS' ? racks : units, unit = pool[Math.floor(rand() * pool.length)];
           s.seen.add(lesson);
@@ -249,17 +319,20 @@
         s.nextAt = s.t + gap();
         // which trouble: a kind that has just joined meets you first, alone; then cartridge trouble takes its share and
         // the rest is DOWN, or HOT once it has joined. LOSS is a whole rack's.
-        const fresh = MASTERY.order.find(k => s.kinds.has(k) && !s.seen.has(k));
-        const carts = Object.keys(TROUBLE).filter(k => s.kinds.has(k));
+        // (around a first of a kind outstaying its grace: only DOWN, or HOT if it has been met; nothing new, no cartridge trouble)
+        const around = outstayed();
+        const fresh = around ? null : MASTERY.order.find(k => s.kinds.has(k) && !s.seen.has(k));
+        const carts = around ? [] : Object.keys(TROUBLE).filter(k => s.kinds.has(k));
         let kind = fresh;
-        if (!kind) { let r = rand(); for (const k of carts) { if (r < TROUBLE[k].share) { kind = k; break; } r -= TROUBLE[k].share; } }
-        const filler = () => s.kinds.has('HOT') && rand() < .55 ? 'HOT' : 'DOWN';
+        const share = k => s.kinds.has('OOM') ? SHARE_WITH_OOM : TROUBLE[k].share;
+        if (!kind) { let r = rand(); for (const k of carts) { if (r < share(k)) { kind = k; break; } r -= share(k); } }
+        const filler = () => s.kinds.has('HOT') && (!around || s.seen.has('HOT')) && rand() < .55 ? 'HOT' : 'DOWN';
         if (!kind) kind = filler();
         if (kind === 'LOSS' && !racks.some(r => !s.open.has(r))) kind = filler();
         const free = (kind === 'LOSS' ? racks : units).filter(u => !s.open.has(u));
         // the first of a kind (or the night's first) waits for the board to be clear, so it really is alone
         const alone = kind === fresh || s.stats.incidents === 0;
-        const room = alone ? !s.open.size : s.open.size < L.open;
+        const room = alone ? !s.open.size : s.open.size < openNow();
         if (room && free.length && s.t < SPAN) {
           const unit = free[Math.floor(rand() * free.length)];
           s.seen.add(kind);
@@ -271,7 +344,9 @@
       // calm: nothing DOWN or HOT for a while (cartridge trouble waits for its cartridge; it doesn't break the calm)
       const troubled = [...s.open.values()].some(i => i.kind === 'DOWN' || i.kind === 'HOT');
       if (troubled) s.calmSince = null; else if (s.calmSince === null) s.calmSince = s.t;
-      const next = NIGHT.chain.find(c => !s.found.has(c)), lastAt = Math.max(0, ...s.found.values());
+      // the shift's offer, refused or not taken by its latest: it comes anyway
+      if (OFFER && !s.found.has(OFFER.cart) && !s.over && (s.t >= s.offerAt || s.t >= OFFER.latest)) reveal(OFFER.cart, 'timer', events);
+      const next = NIGHT.chain.find(c => !s.found.has(c)), lastAt = Math.max(0, ...[...s.found].filter(([c]) => !OFFER || c !== OFFER.cart).map(([, t]) => t));
       if (next && s.t >= lastAt + SLOW.wait) {
         if (s.calmSince !== null && s.t - s.calmSince >= SLOW.calm) reveal(next, 'calm', events);
         else if (s.t >= lastAt + SLOW.latest) reveal(next, 'timer', events);
@@ -317,6 +392,15 @@
       if (next && NIGHT.chain.includes(next) && !s.found.has(next)) reveal(next, 'won', events);
       return events;
     }
+    // Glenn's clash order answered (the page's): obeyed, the shift's offer is handed over now; refused, it comes `after`
+    // shift minutes on. Returns what happened (a found event, or nothing).
+    function offer(how) {
+      const events = [];
+      if (!OFFER || s.found.has(OFFER.cart) || s.over) return events;
+      if (how === 'obeyed') reveal(OFFER.cart, 'obeyed', events);
+      else if (how === 'refused') s.offerAt = Math.min(s.offerAt, s.t + OFFER.after);
+      return events;
+    }
 
     // how much faster than the base energy drains right now, and why (the page's status line can explain it)
     function drainFactor() {
@@ -331,11 +415,11 @@
       const inc = s.open.get(unit);
       if (!inc) return { ok: false, reason: 'nothing wrong' };
       if (inc.fixing) return { ok: false, reason: 'already being fixed' };
-      const need = { DOWN: 'reboot', HOT: 'reroute', STUCK: 'defrag', LOSS: 'route' }[inc.kind];
-      if (verb !== need) return { ok: false, reason: { DOWN: 'not responding', HOT: 'running hot', STUCK: 'fragmented', LOSS: 'dropping packets' }[inc.kind], need };
+      const need = { DOWN: 'reboot', HOT: 'reroute', ...CART_KINDS }[inc.kind];
+      if (verb !== need) return { ok: false, reason: { DOWN: 'not responding', HOT: 'running hot', STUCK: 'fragmented', LOSS: 'dropping packets', OOM: 'out of memory' }[inc.kind], need };
       if (inc.coolUntil > s.t) return { ok: false, reason: 'cooling', waitMs: (inc.coolUntil - s.t) / perMs };
       inc.fixing = true; s.idle = 0;
-      if (verb === 'defrag' || verb === 'route') s.playing.set(unit, CART.play);     // (spent as the game runs)
+      if (Object.values(CART_KINDS).includes(verb)) s.playing.set(unit, CART.play);     // (spent as the game runs)
       else s.energy = Math.max(0, s.energy - ENERGY.cost[verb]);
       return { ok: true, kind: inc.kind };
     }
@@ -345,7 +429,7 @@
     function failed(unit) {
       settle(unit);
       const inc = s.open.get(unit);
-      if (inc) { inc.fixing = false; inc.tries = (inc.tries || 0) + 1; inc.coolUntil = s.t + COOL_MS * perMs; }
+      if (inc) { inc.fixing = false; inc.tries = (inc.tries || 0) + 1; inc.coolUntil = s.t + (COOL[inc.kind] || COOL_MS) * perMs; }
       s.energy = Math.max(0, s.energy - CART.lose);
       s.streak = 0;
       ease();
@@ -355,6 +439,17 @@
       const t = s.t + L.dial.ahead, u = Math.max(0, Math.min(1, (t - DIAL_FROM) / (330 - DIAL_FROM)));
       // (the fourth file from 04:30, not 04:00: the simulation report, item 4: wins fell from 30-76% to 5-19% at 04:00)
       return { files: t < 150 ? 2 : t < 330 ? 3 : 4, writeEvery: 8 - 3 * u - L.dial.faster * u };
+    }
+    // how hard HEAP plays at this hour (heap-audit.js; section 5, "The last three cartridges, decided"): the heap deeper at
+    // the start, more rows to free, a row falling faster, the unit allocating more often: from 00:30 4 rows (a gap each), 4
+    // to free, a row every 750 ms, an allocation every 14 s; 02:00 5, 5, 600 ms, 11 s; 04:00 6 (two gaps a row), 5, 480 ms,
+    // 9 s; shift 4 late 7 (two gaps), 6, 400 ms, 7.5 s. The night's first game is the page's to make easy (teach).
+    const HEAP_DIAL = [[0, 4, 1, 4, 750, 14000], [180, 5, 1, 5, 600, 11000], [300, 6, 2, 5, 480, 9000]];
+    function heapDial() {
+      const t = s.t + L.dial.ahead;
+      if (LEVELS.indexOf(L) === 2 && t >= 300) return { start: 7, holes: 2, target: 6, fall: 400, grow: 7500 };
+      const [, start, holes, target, fall, grow] = HEAP_DIAL.filter(([at]) => t >= at).pop();
+      return { start, holes, target, fall, grow };
     }
     // how hard ROUTE plays at this hour (route-audit.js): more hops, more dead links, a faster train; night 3 more so.
     // The night's first game is the page's to make easy (teach).
@@ -368,12 +463,12 @@
       settle(unit);
       const inc = s.open.get(unit);
       if (!inc) return;
-      s.energy = Math.min(1, s.energy + (inc.kind === 'STUCK' || inc.kind === 'LOSS' ? CART.win : ENERGY.refund[inc.kind] || 0));
+      s.energy = Math.min(1, s.energy + (CART_KINDS[inc.kind] ? CART.win : ENERGY.refund[inc.kind] || 0));
       endOutage(unit, inc);
       s.open.delete(unit);
       s.stats.fixed++;
       // clean or not: mastery counts it, and the pace follows it
-      const cart = inc.kind === 'STUCK' || inc.kind === 'LOSS';
+      const cart = !!CART_KINDS[inc.kind];
       const clean = cart ? !inc.tries : !inc.slow && !inc.struck;
       const quick = clean && (cart || s.t - inc.since <= FLOW.quick);
       if (clean) s.cleanSince++;
@@ -388,7 +483,14 @@
     }
     // the energy holds still while the page says so: hold('glenn', true) while Glenn teaches, hold('mail', true) while
     // the mail is open
-    function hold(why, on) { if (on) s.holds.add(why); else s.holds.delete(why); }
+    // hold('teach', true): Glenn is waiting on a lesson (design.md section 5, "Surface and focus, decided", 6: one command,
+    // then wait for the hands). The night holds its breath: no drain, nothing new, no strike clock and no heat turning into
+    // a unit down; let go, the next trouble is a gap away if it came due meanwhile, as after any other (not at once, for
+    // the time the lesson took; not later than it was due if it hadn't)
+    function hold(why, on) {
+      if (why === 'teach' && !on && s.holds.has('teach') && s.nextAt <= s.t) s.nextAt = s.t + gap();
+      if (on) s.holds.add(why); else s.holds.delete(why);
+    }
     // a cartridge game won pays for itself (Arnold, 2026-09-30: winning used to leave you worse off, since the game's
     // minute of drain was more than the win gave back): energy goes back to where it was when the game began, plus
     // the bonus, if that is more than it is now
@@ -432,10 +534,10 @@
       // no new trouble at all while on (a protected Pong match); what is open still counts toward its strikes
       protect: on => { s.protect = !!on; },
       get lastQuick() { return !!s.lastQuick; },
-      tick, fix, finish, failed, hold, won, handOver, poke, rest, paidBack, drainFactor, defragDial, routeDial, drink, spend, setStrain, useBean, addBeans, inject, find, clock, uptime, report,
+      tick, fix, finish, failed, hold, won, offer, heapDial, handOver, poke, rest, paidBack, drainFactor, defragDial, routeDial, drink, spend, setStrain, useBean, addBeans, inject, find, clock, uptime, report,
       get t() { return s.t; }, get over() { return s.over; }, get ending() { return s.ending; },
       get strikes() { return s.strikes; }, get energy() { return s.energy; }, get beans() { return s.beans; }, get playing() { return s.playing.size > 0; },
-      get flow() { return s.flow; }, get kinds() { return [...s.kinds]; }, get held() { return [...s.holds]; }, MASTERY, FLOW,
+      get flow() { return s.flow; }, get offered() { return OFFER ? OFFER.cart : null; }, get kinds() { return [...s.kinds]; }, get held() { return [...s.holds]; }, MASTERY, FLOW, GRACE,
       get streak() { return s.streak; }, get sent() { return s.sent; }, DELIVERY,
       found: cart => s.found.has(cart), foundAt: cart => s.found.get(cart) ?? null, handedAt: cart => s.handed.get(cart) ?? null, startsWith: NIGHT.start, initial: () => initial.slice(),
       state: unit => s.open.get(unit) || null,
@@ -445,6 +547,10 @@
       open: () => [...s.open.entries()].map(([unit, inc]) => ({ unit, ...inc, forMin: s.t - inc.since,
         toStrike: inc.downSince === null || inc.fixing ? null : STRIKE.after + inc.struck * STRIKE.again - inc.idle })),
       CART, PONG_BREAK: ENERGY.pong, SPAN, STRIKE, level: LEVELS.indexOf(L) + 1,
+      // which of the four shifts this is (1..4), whether it is a night played again on purpose (the repeat), its real length
+      no: shiftNo, again: !!SH.again, realMs, SHIFTS,
+      // what the next shift starts from (the page saves it at 05:30): energy, beans, the pace, the kinds met, the cartridges handed over
+      carryOut: () => ({ energy: +s.energy.toFixed(3), beans: s.beans, flow: +s.flow.toFixed(3), kinds: [...s.kinds], met: [...s.seen], carts: [...s.handed.keys()] }),
     };
   };
 })();

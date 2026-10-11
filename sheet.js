@@ -1,7 +1,8 @@
 /* sheet.js — the cheat sheet (Eugene's playtest, 2026-10-02; design.md, "Onboarding"): the right pedestal's top drawer
    opens as the others do, and in it lies a handwritten card, friendly and in-world: what DOWN, HOT, STUCK and LOSS
-   mean, the fix for each, and that top shows every rack. Clicked, it is lifted and held up in front of you, as the
-   polaroid is; clicked again, it goes back where it lay.
+   mean, the fix for each, and that top shows every rack; a second card behind it has the two later troubles (OOM,
+   INTRUSION). Clicked, both are lifted and held up in front of you, the first in front; a click brings the second to the
+   front, the next puts them back where they lay.
 
    Pure drawing in the room's camera (drawer.js's pedestal space F, toCamF and its camera; one millimetre scale,
    1.765 mm a camera unit); the page (app.js, "the cheat sheet") does the clicks, the timing and the sounds.
@@ -20,7 +21,7 @@
   // the card: 140 x 90 mm, landscape; where it stands: its bottom edge's middle at x, foot (in depth units) in front of
   // the drawer's back, leaning back against it by lean
   const CARD = { w: 140, h: 90, x: 1340, foot: .05, lean: 15 * Math.PI / 180 };
-  // What it says (Arnold to approve the words; design.md, "Onboarding"). In Caveat, the room's one hand. [left, right]:
+  // What it says (Arnold approved the words, 2026-10-03; design.md, "Onboarding"). In Caveat, the room's one hand. [left, right]:
   // the kinds in a column, what they mean and the fix beside them; STUCK and LOSS say how, on a second line under their
   // fix (Arnold, 2026-10-03: "the DEFRAG cart" alone left a player not knowing what to type)
   const LINES = [
@@ -35,6 +36,21 @@
     { t: "you'll be fine :)", y: 39, size: 7.5, right: true },
   ];
   const COL = { k: -61, t: -36 }, SIZE = 8;
+  const FRONT = { lines: LINES, col: COL, size: SIZE };
+  // the second card (build step 8, option b, Arnold 2026-10-11): standing behind the first, the two later troubles in the
+  // first's manner and size, three lines each; its text column further right, as INTRUSION is wider than the first's keys
+  const LATER = [
+    { t: 'and two more, later on', y: -33, size: 9 },
+    { k: 'OOM', t: 'out of memory:', y: -20 },
+    { t: 'put in the HEAP cart,', y: -12, cont: true },
+    { t: 'type  heap + the unit', y: -4, cont: true },
+    { k: 'INTRUSION', t: 'someone probing it:', y: 6 },
+    { t: 'put in the FIREWALL cart,', y: 14, cont: true },
+    { t: 'type  firewall + the unit', y: 22, cont: true },
+  ];
+  const SECOND = { lines: LATER, col: { k: -61, t: -21 }, size: SIZE };
+  // (window.SHEET_OPTION = { lines, col, size }, for stills pages only, overrides the face drawn; the page never sets it)
+  const face = f => Object.assign({}, f || FRONT, window.SHEET_OPTION || {});
 
   // (box: another drawer of the same make, the right pedestal's middle one, M.'s: mdrawer.js)
   function drawer(out, box = BOX) {
@@ -76,6 +92,20 @@
     const foot = window.deskDrawer.toCamF([CARD.x, y1 - wall - .4, out - BOX.depth + CARD.foot]);
     return { c: [0, 1, 2].map(i => foot[i] - B[i] * CARD.h / 2 * MM), A: [1, 0, 0], B };
   }
+  // the second card standing behind it: nearer the drawer's back by back (depth units) and a little to the left, so its
+  // head shows over the first's top (the stills' place, build step 8)
+  const LIE2 = { back: .02, dx: -22 };
+  function lyingPose2(out) {
+    const { y1, wall } = BOX, l = CARD.lean, B = [0, Math.cos(l), -Math.sin(l)];
+    const foot = window.deskDrawer.toCamF([CARD.x + LIE2.dx, y1 - wall - .4, out - BOX.depth + CARD.foot - LIE2.back]);
+    return { c: [0, 1, 2].map(i => foot[i] - B[i] * CARD.h / 2 * MM), A: [1, 0, 0], B };
+  }
+  // held, the one behind: a little further away, up and to the right, turned the other way (as a letter's polaroid behind it)
+  const BEH = { Z: 216, dx: 46, up: 66, rot: 2 };
+  function behindPose(rest) {
+    const Z = BEH.Z, r = BEH.rot * Math.PI / 180;
+    return { c: [BEH.dx * Z / 1500, (rest + 480 - BEH.up - 813) * Z / 1500, Z], A: [Math.cos(r), Math.sin(r), 0], B: [-Math.sin(r), Math.cos(r), 0] };
+  }
   // held up in front of you, upright, a little turned: about 570 px across (the polaroid's is 300; there is more to read)
   function heldPose(rest) {
     const Z = 210, r = 1.5 * Math.PI / 180;
@@ -83,7 +113,7 @@
   }
   // the card through a projection: its outline sampled every 2 mm (it bends with the room lying in the drawer), its
   // words in Caveat, each line placed by an affine fit at its own baseline
-  function card({ c, A, B }, project, width = 1) {
+  function card({ c, A, B }, project, width = 1, which) {
     const at = (mx, my) => [0, 1, 2].map(i => c[i] + (A[i] * mx + B[i] * my) * MM);
     const N = [A[1] * B[2] - A[2] * B[1], A[2] * B[0] - A[0] * B[2], A[0] * B[1] - A[1] * B[0]];
     const faceUp = -(N[0] * c[0] + N[1] * c[1] + N[2] * c[2]) < 0;
@@ -91,22 +121,25 @@
     const ring = C.flatMap((p, i) => { const e = C[(i + 1) % 4], n = Math.max(1, Math.ceil(Math.hypot(e[0] - p[0], e[1] - p[1]) / 2)); return Array.from({ length: n }, (_, k) => project(at(p[0] + (e[0] - p[0]) * k / n, p[1] + (e[1] - p[1]) * k / n))); });
     let svg = `<polygon points="${fmt(ring)}" fill="${faceUp ? '#FAFAF9' : '#F2F2F0'}" stroke="#B4B4B4" stroke-width="${width}" stroke-linejoin="round"/>`;
     if (faceUp) {
+      const { lines, col: COL, size: SIZE } = face(which);
       const text = (s, mx, my, size, anchor = 'start', fill = '#6E6E6C') => {
         const o = project(at(mx, my)), ax = project(at(mx + 1, my)), ay = project(at(mx, my + 1));
         const m = [ax[0] - o[0], ax[1] - o[1], ay[0] - o[0], ay[1] - o[1], o[0], o[1]].map(n => n.toFixed(4));
         return `<text transform="matrix(${m.join(' ')})" x="0" y="0" text-anchor="${anchor}" font-family="Caveat, cursive" font-size="${size}" fill="${fill}">${s}</text>`;
       };
-      for (const l of LINES) {
+      for (const l of lines) {
         if (l.k) svg += text(l.k, COL.k, l.y, SIZE, 'start', '#4E4E4C') + text(l.t, COL.t, l.y, SIZE);
         else if (l.cont) svg += text(l.t, COL.t, l.y, SIZE);
         else if (l.right) svg += text(l.t, hw - 10, l.y, l.size || SIZE, 'end');
-        else svg += text(l.t, COL.k, l.y, l.size || SIZE, 'start', l.size === 9 ? '#4E4E4C' : '#6E6E6C');
+        else svg += text(l.t, COL.k, l.y, l.size || SIZE, 'start', l.size === 9 || l.head ? '#4E4E4C' : '#6E6E6C');
       }
     }
     return { svg, hit: fmt(ring) };
   }
   // it is drawn once it is wholly out of the pedestal (its top edge in front of the pedestal's face; inside, it is in the
   // dark of the opening): 83% of the way out, while the drawer is still moving
-  const cardOut = out => out - BOX.depth + CARD.foot - CARD.h * Math.sin(CARD.lean) / 1765 >= .0005;
-  window.cheatSheet = { cardOut, BOX, OPEN, CARD, LINES, drawer, drawerHit, lyingPose, heldPose, card };
+  // (the second card stands further back: it comes out a little later)
+  const cardOut = (out, back = 0) => out - BOX.depth + CARD.foot - back - CARD.h * Math.sin(CARD.lean) / 1765 >= .0005;
+  const cardOut2 = out => cardOut(out, LIE2.back);
+  window.cheatSheet = { cardOut, cardOut2, BOX, OPEN, CARD, LINES, LATER, FRONT, SECOND, drawer, drawerHit, lyingPose, lyingPose2, heldPose, behindPose, card };
 })();

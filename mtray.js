@@ -58,7 +58,7 @@
   const pxmmOf = (f, project) => { const o = project(f(0, 0, 0)), a = project(f(1, 0, 0)), b = project(f(0, 1, 0)); return Math.max(Math.hypot(a[0] - o[0], a[1] - o[1]), Math.hypot(b[0] - o[0], b[1] - o[1])); };
   // (in motion, FAST: a coarser sampling and fewer sectors, the same shapes; at rest, 0.2 px)
   let FAST = 1, SECT = 720;
-  const stepOf = px => Math.max(.06, Math.min(.5, .2 / px)) * FAST;
+  const stepOf = px => Math.max(.045, Math.min(.5, .2 / px)) * FAST;   // (.045: a thing held up alone is drawn up to 4.4 px a mm)
   const flat = (loop, f, n, project, fill, holes = []) => {
     const rings = [loop, ...holes].map(l => l.map(([a, b]) => project(f(a, b, n))));
     const d = rings.map(r => pathOf(r) + 'Z').join('');
@@ -86,8 +86,8 @@
   // going home), the seconds hand stopped at 47. The strap: padded leather, 18 wide at the case narrowing to 16, 3.5
   // thick, stitched along its edges, its holes on the 12 side, its keeper and steel buckle on the 6 side.
   const WATCH = { x: 80, y: 30, rot: .08, r: 19, h: 7.6, lugIn: 9.2, lugW: 3.6, lugOut: 6 };
-  function watch(F, project, det) {
-    const f = place(F, WATCH.x, WATCH.y, WATCH.rot), step = stepOf(pxmmOf(f, project)), { r, h, lugIn, lugW, lugOut } = WATCH;
+  function watch(f, project, det) {
+    const step = stepOf(pxmmOf(f, project)), { r, h, lugIn, lugW, lugOut } = WATCH;
     const ST = 3.5, sf = (a, b, n) => f(a, b, n + ST / 2), STRAP = mats(['#E6E6E4', '#DCDCDA'], ['#D8D8D6', '#CECECC']);
     const upC = [[-9, 15.5, 0], [9, 15.5, 0], [8, 72, 8], [-8, 72, 8]], dnC = [[-8, -52, 1.5], [8, -52, 1.5], [9, -15.5, 0], [-9, -15.5, 0]];
     const up = rounded(upC, step), dn = rounded(dnC, step);
@@ -151,8 +151,8 @@
   // ---- a pack of gum: 72 x 20 x 12, its long edges rounded, the wrapper's band round its middle (a shade darker,
   // SPEARMINT on it), the paper folded over at its ends
   const GUM = { x: 52, y: -70, rot: .2, L: 72, W: 20, H: 12, band: 24 };
-  function gum(F, project, det) {
-    const f = place(F, GUM.x, GUM.y, GUM.rot), step = stepOf(pxmmOf(f, project)), { L, W, H, band } = GUM;
+  function gum(f, project, det) {
+    const step = stepOf(pxmmOf(f, project)), { L, W, H, band } = GUM;
     const sec = rounded([[-W / 2, 0, 2.5], [W / 2, 0, 2.5], [W / 2, H, 2.5], [-W / 2, H, 2.5]], step);   // (b, n) across it
     const segs = [[-L / 2, -band / 2, 'wrap'], [-band / 2, band / 2, 'band'], [band / 2, L / 2, 'wrap']];
     const M = { wrap: mats(['#F2F2F0', '#E6E6E4'], ['#F2F2F0', '#E6E6E4']), band: mats(['#E4E4E2', '#D8D8D6'], ['#E4E4E2', '#D8D8D6']) };
@@ -175,8 +175,8 @@
   // ---- a pen: a capped ballpoint 138 long, its metal tip and collar, a rubber grip a shade darker, the body, the cap
   // over it with its end rounded, and the cap's clip lying along its top
   const PEN = { x: -40, y: -16, rot: -.05, L: 138, R: 5.6 };
-  function pen(F, project, det) {
-    const f = place(F, PEN.x, PEN.y, PEN.rot), { L, R } = PEN, { A, B, N } = axes(f), step = stepOf(pxmmOf(f, project));
+  function pen(f, project, det) {
+    const { L, R } = PEN, { A, B, N } = axes(f), step = stepOf(pxmmOf(f, project));
     const end = Array.from({ length: 7 }, (_, k) => { const t = Math.PI / 2 * (k + 1) / 7; return [132 + 6 * Math.sin(t), R * Math.cos(t), 'cap']; });
     const prof = [[0, 0, 'tip'], [.5, .55, 'tip'], [7, 2.3, 'tip'], [7, 3.3, 'collar'], [10, 3.5, 'collar'], [10, 4.5, 'grip'], [21, 4.3, 'grip'], [32, 4.5, 'grip'], [32, 5, 'body'],
       [86, 5, 'body'], [86, R, 'cap'], [132, R, 'cap'], ...end.slice(0, -1), [L, 0, 'cap']];
@@ -199,8 +199,8 @@
   // tip. Every part a solid in the mug's light: the rims 2 mm across and 2.6 deep, the bridge, the hinges, the temples,
   // the tips; small (in the drawer), the rims as wire lines.
   const GL = { x: -52, y: -66, rot: .03, r: 23, cx: 31 };
-  function glasses(F, project, det) {
-    const f = place(F, GL.x, GL.y, GL.rot), step = stepOf(pxmmOf(f, project)), { r, cx } = GL;
+  function glasses(f, project, det) {
+    const step = stepOf(pxmmOf(f, project)), { r, cx } = GL;
     const FRAME = mats(['#DADAD8', '#CECECC'], ['#CDCDCB', '#C4C4C2']), TIPS = mats(['#CFCFCD', '#C4C4C2'], ['#C4C4C2', '#BABAB8']);
     const arcC = (c, rr, t0, t1) => { const m = Math.max(4, Math.ceil(Math.abs(t1 - t0) * rr / step)); return Array.from({ length: m + 1 }, (_, k) => { const tt = t0 + (t1 - t0) * k / m; return [c[0] + rr * Math.cos(tt), c[1] + rr * Math.sin(tt)]; }); };
     const line = (p, q) => { const n = Math.max(1, Math.ceil(Math.hypot(q[0] - p[0], q[1] - p[1]) / step)); return Array.from({ length: n + 1 }, (_, k) => [p[0] + (q[0] - p[0]) * k / n, p[1] + (q[1] - p[1]) * k / n]); };
@@ -254,8 +254,16 @@
   // front of you, its back raised 45 degrees, about 690 px across.
   const IN = { x: 1360, y: 1520 };
   const trayOut = out => out - .012 - T.d / 2 / 1765;       // its centre's depth
-  function drawerPose(out) {
-    return { c: dd().toCamF([IN.x, IN.y, trayOut(out)]), A: [1, 0, 0], B: [0, 0, 1] };
+  // rise: px up from where it rests (the desk's px at the drawer's face), lifting it straight up out of the drawer
+  function drawerPose(out, rise = 0) {
+    return { c: dd().toCamF([IN.x, IN.y - rise, trayOut(out)]), A: [1, 0, 0], B: [0, 0, 1] };
+  }
+  // how far it rises before it comes to you (playtest round 3, 2026-10-10: it came up from under the drawer): until its
+  // underside is 4 mm over the drawer's walls (their top is the drawer front's top, mDrawer.BOX.y0). Its underside is 3 mm
+  // under its pose's centre.
+  function riseOut(out) {
+    const a = dd().toCamF([IN.x, IN.y, trayOut(out)]), b = dd().toCamF([IN.x, IN.y + 1, trayOut(out)]), pxCam = b[1] - a[1];
+    return IN.y - window.mDrawer.BOX.y0 + (3 + 4) * MM / pxCam;
   }
   const outAt = () => .012 + T.d / 1765 + .0005;           // the drawer's travel from which it is wholly out
   // (one pose, as you would hold it looking at the screen; looking down slides the picture with the view (heldProject),
@@ -265,20 +273,63 @@
     return { c: [0, (585 - 813) * Z / 1500, Z], A: [Math.cos(r), Math.sin(r), 0], B: [Math.sin(r) * Math.sin(th), -Math.cos(r) * Math.sin(th), Math.cos(th)] };
   }
 
-  /* the tray and everything in it at pose, through project. env: { lifted, opened }. Returns { svg, hit, envHit }. */
-  function render(pose, project, { env = {}, width = 1, fast = false, bare = false } = {}) {
+  // ---- the things, one at a time (Arnold, 2026-10-10, after playtest round 3: each can be lifted out of the held tray and
+  // held up, turned in your hand as the canister is; only the envelope opens). Each thing's place in the tray, what it is
+  // drawn by, and where it can be clicked: its footprint (a, b) from its floor to its top (n), hulled on the screen.
+  const THINGS = {
+    watch: { at: WATCH, draw: watch, top: 9.5, foot: [[-9, 72], [9, 72], [11, -63], [-11, -63], ...circle([0, 0], WATCH.r + WATCH.lugOut, 1)] },
+    gum: { at: GUM, draw: gum, top: GUM.H, foot: [[-GUM.L / 2, -GUM.W / 2], [GUM.L / 2, -GUM.W / 2], [GUM.L / 2, GUM.W / 2], [-GUM.L / 2, GUM.W / 2]] },
+    pen: { at: PEN, draw: pen, top: 2 * PEN.R, foot: [[-PEN.L / 2, -PEN.R], [PEN.L / 2, -PEN.R], [PEN.L / 2, PEN.R], [-PEN.L / 2, PEN.R]] },
+    glasses: { at: GL, draw: glasses, top: 5, foot: [...circle([GL.cx, 0], GL.r + 1, 1), ...circle([-GL.cx, 0], GL.r + 1, 1), [GL.cx + GL.r + 4, -22], [-GL.cx - GL.r - 4, -22]] },
+  };
+  const hull = ps => {
+    const p = ps.slice().sort((u, v) => u[0] - v[0] || u[1] - v[1]), cr = (o, a, b) => (a[0] - o[0]) * (b[1] - o[1]) - (a[1] - o[1]) * (b[0] - o[0]);
+    const lo = [], hi = [];
+    for (const q of p) { while (lo.length > 1 && cr(lo[lo.length - 2], lo[lo.length - 1], q) <= 0) lo.pop(); lo.push(q); }
+    for (const q of p.reverse()) { while (hi.length > 1 && cr(hi[hi.length - 2], hi[hi.length - 1], q) <= 0) hi.pop(); hi.push(q); }
+    return lo.slice(0, -1).concat(hi.slice(0, -1));
+  };
+  const thingHit = (name, f, project) => { const t = THINGS[name]; return fmt(hull(t.foot.flatMap(([a, b]) => [project(f(a, b, 0)), project(f(a, b, t.top))]))); };
+  // a thing's own frame where it lies in a tray at pose
+  const placed = (trayF, name) => { const a = THINGS[name].at; return place(trayF, a.x, a.y, a.rot); };
+  function thingPose(trayPose, name) {
+    const { o, A, B } = axes(placed(frameOf(trayPose), name));
+    return { c: o, A: unit(A), B: unit(B) };
+  }
+  // held up alone, in front of the held tray, nearer than it: its top toward you, tipped back th degrees from upright
+  // (90: square on), turned yaw degrees about the upright and roll in your hand, about px a mm (4.4 at most: stepOf)
+  // (55 degrees: nearer square on, the glasses' 2.6 mm rims showed their sides as slivers of 2 px; tipped 35 degrees from
+  // you, every side that shows is 6 px or more, as in the held tray, tipped 45)
+  const HELD = { watch: { px: 4, th: 55, yaw: -14, roll: -4 }, gum: { px: 4.4, th: 55, yaw: 18, roll: 5 }, pen: { px: 3.6, th: 55, yaw: 10, roll: -6 }, glasses: { px: 4, th: 55, yaw: -10, roll: 3 } };
+  function heldThingPose(name) {
+    const h = HELD[name], Z = 1500 * MM / h.px, th = h.th * Math.PI / 180, r = h.roll * Math.PI / 180, y = h.yaw * Math.PI / 180;
+    const A0 = [Math.cos(r), Math.sin(r), 0], B0 = [Math.sin(r) * Math.sin(th), -Math.cos(r) * Math.sin(th), Math.cos(th)];
+    const yaw = v => [v[0] * Math.cos(y) + v[2] * Math.sin(y), v[1], -v[0] * Math.sin(y) + v[2] * Math.cos(y)];
+    return { c: [0, (430 - 813) * Z / 1500, Z], A: yaw(A0), B: yaw(B0) };   // (where the envelope is held, over the tray)
+  }
+  // one thing alone at its own pose (lifted out, or held)
+  function renderThing(name, pose, project, { fast = false } = {}) {
+    FAST = fast ? 2.5 : 1; SECT = fast ? 360 : 720;
+    const f = frameOf(pose), det = pxmmOf(f, project) >= 1.8;
+    return { svg: THINGS[name].draw(f, project, det), hit: thingHit(name, f, project) };
+  }
+
+  /* the tray and everything in it at pose, through project. env: { lifted, opened }; out: the thing lifted out of it (not
+     drawn). Returns { svg, hit, envHit, things: [{ name, hit }] (in the order drawn, the nearest last) }. */
+  function render(pose, project, { env = {}, width = 1, fast = false, bare = false, out = null } = {}) {
     FAST = fast ? 2.5 : 1; SECT = fast ? 360 : 720;
     const F = frameOf(pose), px = pxmmOf(F, project), step = stepOf(px), det = px >= 1.8;
     let svg = SOL().extrusion(trayShape(step), (a, b, n) => F(a, b, n + T.depth - T.h / 2), project, TRAY_MATS, { width });
     // what lies in it, the furthest first (bare: the tray alone, for where it is)
-    const things = bare ? [] : [[WATCH, () => watch(F, project, det)], [GUM, () => gum(F, project, det)], [PEN, () => pen(F, project, det)], [GL, () => glasses(F, project, det)]];
+    const thingHits = [];
+    const things = bare ? [] : Object.keys(THINGS).filter(name => name !== out).map(name => [THINGS[name].at, () => { const f = placed(F, name); thingHits.push({ name, hit: thingHit(name, f, project) }); return THINGS[name].draw(f, project, det); }]);
     let envHit = null;
-    if (!env.lifted && !bare) things.push([ENV_IN, () => { const e = window.mDrawer.envelope(envelopePose(F), project, { opened: env.opened, width }); envHit = e.hit; return e.svg; }]);
+    if (!env.lifted && !bare) things.push([ENV_IN, () => { const e = window.mDrawer.envelope(envelopePose(F), project, { opened: env.opened, width }); envHit = e.hit; thingHits.push({ name: 'envelope', hit: e.hit }); return e.svg; }]);
     things.sort((p, q) => F(q[0].x, q[0].y, 0)[2] - F(p[0].x, p[0].y, 0)[2]);
     for (const [, draw] of things) svg += draw();
     const w = T.w / 2, d = T.d / 2, hit = fmt(rounded([[-w, -d, T.r], [w, -d, T.r], [w, d, T.r], [-w, d, T.r]], 2).map(([a, b]) => project(F(a, b, T.depth))));
-    return { svg, hit, envHit, det, px };
+    return { svg, hit, envHit, things: thingHits, det, px };
   }
   const heldProject = (rest, s = 1) => p => { const a = dd().roomF(p), b = dd().proj(p); return [a[0] + (b[0] - a[0]) * s, a[1] + (b[1] - a[1]) * s + rest * s]; };
-  window.mTray = { heldProject, T, WATCH, GUM, PEN, GL, ENV_IN, drawerPose, heldPose, outAt, render, envelopePose, frameOf };
+  window.mTray = { heldProject, T, WATCH, GUM, PEN, GL, ENV_IN, THINGS, drawerPose, riseOut, heldPose, outAt, render, envelopePose, frameOf, thingPose, heldThingPose, renderThing };
 })();

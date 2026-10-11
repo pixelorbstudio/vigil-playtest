@@ -213,7 +213,7 @@
   const LID_ROUND = r => Array.from({ length: 25 }, (_, k) => { const t = Math.PI / 2 * k / 24; return [13 + 5 * Math.sin(t), r - 5 + 5 * Math.cos(t), 'round']; });
   let CLIP_IDS = 0;
   /* held up: what is 'slip' (rolled in its mouth) or 'empty'; lid: how far open (radians; 125 degrees, sprung open) */
-  function held(what, pose, project, lid = 0, { aw = false } = {}) {
+  function held(what, pose, project, lid = 0, { aw = false, roll = null } = {}) {
     const L = window.lathe, { r } = CAN, { C, A, U, V } = pose, Uu = V3.unit(U);
     const at = (h, u, v) => V3.add(V3.add(V3.add(C, V3.mul(A, h)), V3.mul(U, u)), V3.mul(V, v));
     const seat = SEAT;
@@ -239,18 +239,18 @@
     const inside = items.filter(x => x.mat === 'inside'), rim = items.filter(x => x.mat === 'rim'), walls = items.filter(x => x.mat !== 'inside' && x.mat !== 'rim');
     let inTube = '', outOfIt = '';
     if (what === 'slip') {
-      const roll = rolledSlip(at, project, seat);
-      inTube = roll.inner;                               // (no clip: the walls and the rim after it hide what is outside the mouth)
+      const rl = rolledSlip(at, project, seat, rollOut(lid, roll));
+      inTube = rl.inner;                               // (no clip: the walls and the rim after it hide what is outside the mouth)
       // the part out of the mouth goes last; its fill covered half the stroke of the inner part's lines at the cut (a
       // silhouette leaves its end ring on the tangent), so those lines go again on top within 8 px of where they meet it
       const ends = [];
-      for (const m of roll.inner.matchAll(/<path d="([^"]+)"/g)) for (const sp of m[1].split('M').filter(Boolean)) {
+      for (const m of rl.inner.matchAll(/<path d="([^"]+)"/g)) for (const sp of m[1].split('M').filter(Boolean)) {
         const ps = [...sp.matchAll(/(-?\d+\.?\d*),(-?\d+\.?\d*)/g)].map(q => [+q[1], +q[2]]);
-        for (const e of [ps[0], ps[ps.length - 1]]) if (roll.seam.some(q => Math.hypot(q[0] - e[0], q[1] - e[1]) < 1.5)) ends.push(e);
+        for (const e of [ps[0], ps[ps.length - 1]]) if (rl.seam.some(q => Math.hypot(q[0] - e[0], q[1] - e[1]) < 1.5)) ends.push(e);
       }
-      const innerLines = [...roll.inner.matchAll(/<path [^>]*\/>/g)].map(m => m[0]).join('');
+      const innerLines = [...rl.inner.matchAll(/<path [^>]*\/>/g)].map(m => m[0]).join('');
       const id = 'rollseam' + (++CLIP_IDS);
-      outOfIt = roll.outer + (ends.length ? `<clipPath id="${id}">${ends.map(e => `<circle cx="${e[0].toFixed(2)}" cy="${e[1].toFixed(2)}" r="8"/>`).join('')}</clipPath><g clip-path="url(#${id})">${innerLines}</g>` : '');
+      outOfIt = rl.outer + (ends.length ? `<clipPath id="${id}">${ends.map(e => `<circle cx="${e[0].toFixed(2)}" cy="${e[1].toFixed(2)}" r="8"/>`).join('')}</clipPath><g clip-path="url(#${id})">${innerLines}</g>` : '');
     }
     const lidIn = sort(lidItems.filter(x => x.mat === 'inside')), lidOut = sort(lidItems.filter(x => x.mat !== 'inside'));
     const lidSvg = lidIn + lidOut.replace(/<path [^>]*\/>/g, '') + [...lidOut.matchAll(/<path [^>]*\/>/g)].map(m => m[0]).join('');
@@ -261,21 +261,30 @@
   // outline passed behind the near rim just inside the mouth); in two parts cut at the mouth, 2880 sectors so the two
   // parts' silhouettes meet without a jog; its end shows the paper's turns, a spiral clear of its rim
   const SLIP_ROLL = { r: 11, w: 80, out: 40 };
-  function rolledSlip(at, project, seat) {
-    const L = window.lathe, { r, w, out } = SLIP_ROLL, h0 = seat + out - w, h1 = seat + out;
+  // how far the roll is out of the mouth as the lid opens (playtest round 4, 2026-10-10: shown whole the moment the lid
+  // passed 60 degrees, it sprang 40 mm out of the mouth in one frame, and from 60 to 90 degrees it stood where the lid's
+  // skirt still was): flush inside the mouth until the lid is upright, then out as it opens on to 125 (a lid past upright
+  // is wholly behind its hinge, clear of the roll). Sprung open, it is out its 40 mm, where the slip's own flight takes over.
+  // roll: how far out (0 .. 1), when the flow times it (post.flow.take: the spring is upright to open in 40 ms, too quick to
+  // read, so the roll slides out over the beat after); never while the lid is under upright.
+  const rollOut = (lid, roll = null) => { const x = lid < Math.PI / 2 ? 0 : roll != null ? Math.max(0, Math.min(1, roll)) : Math.max(0, Math.min(1, (lid - Math.PI / 2) / (125 * Math.PI / 180 - Math.PI / 2))); return SLIP_ROLL.out * x * x * (3 - 2 * x); };
+  function rolledSlip(at, project, seat, out = SLIP_ROLL.out) {
+    const L = window.lathe, { r, w } = SLIP_ROLL, h0 = seat + out - w, h1 = seat + out;
     const paper = { body: ['#FAFAF9', '#ECECEA'], end: ['#FAFAF9', '#F0F0EE'] };
     const off = -3;
     const C = at(0, 0, off), A = V3.add(at(1, 0, off), V3.mul(C, -1)), U = V3.add(at(0, 1, off), V3.mul(C, -1)), V = V3.add(at(0, 0, off + 1), V3.mul(C, -1));
     const frame = { C, A, U, V }, opts = { sectors: 2880, seal: true };
-    const inner = L.compose(L.lathe([[h0, 0, 'end'], [h0, r, 'body'], [seat, r]], frame, project, paper, { ...opts, open: [2] }));
-    const outerItems = L.lathe([[seat, r, 'body'], [h1, r, 'end'], [h1, 0]], frame, project, paper, { ...opts, open: [0] });
+    // (still inside the mouth: one closed roll, its end and spiral in the tube, under the walls and the rim)
+    const inside = out < .05;
+    const inner = L.compose(L.lathe(inside ? [[h0, 0, 'end'], [h0, r, 'body'], [h1, r, 'end'], [h1, 0]] : [[h0, 0, 'end'], [h0, r, 'body'], [seat, r]], frame, project, paper, inside ? opts : { ...opts, open: [2] }));
+    const outerItems = inside ? [] : L.lathe([[seat, r, 'body'], [h1, r, 'end'], [h1, 0]], frame, project, paper, { ...opts, open: [0] });
     const pt = (h, rr, a) => project(V3.add(V3.add(V3.add(C, V3.mul(A, h)), V3.mul(U, rr * Math.cos(a))), V3.mul(V, rr * Math.sin(a))));
     const k = Math.hypot(...[0, 1].map(i => pt(h1, r, 0)[i] - pt(h1, 0, 0)[i])) / r;
     const sp = [], tMax = 2 * 2 * Math.PI, r0 = r * .18, r1 = r * .72;
     for (let t = 0; t <= tMax;) { const rr = r1 - (r1 - r0) * t / tMax; sp.push(pt(h1 + .01, rr, 1.2 + t)); t += Math.min(.05, .15 / (k * Math.max(rr, .5))); }
     const spiral = `<path d="M${fmt(sp).split(' ').join('L')}" stroke="#B4B4B4" stroke-linecap="round" stroke-linejoin="round" fill="none"/>`;
     const seam = Array.from({ length: 720 }, (_, i) => pt(seat, r, 2 * Math.PI * i / 720));
-    return { inner, outer: L.compose(outerItems) + spiral, seam, tip: pt(h1, 0, 0) };
+    return inside ? { inner: inner + spiral, outer: '', seam: [], tip: pt(h1, 0, 0) } : { inner, outer: L.compose(outerItems) + spiral, seam, tip: pt(h1, 0, 0) };
   }
   // where the roll's top end is on screen (the slip comes out from there)
   function rollTip(pose, project) {

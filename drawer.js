@@ -28,7 +28,8 @@
     // y = 1219.2 - 90.4((x - 720)/784)^2); it had 110 and bent visibly more
     edge: curve(1300, 90),         // front edge of the desk top
     lip: curve(1330, 92),          // bottom of the desk top's front face
-    X0: -300, X1: 1740,            // the width of Arnold's 1920 frame (stage x -240..1680), and a little more
+    X0: -620, X1: 2060,            // the width of Arnold's 2560 frame (stage x -560..2000), and a little more (it was -300..1740
+                                   // for his 1920 frame: the same curves, carried on; on the 20 px grid it had)
     bottom: 1900,                  // the apron runs past anything the look-down shows
   };
   // The drawer's opening in the apron, wide enough for four cartridges side by side.
@@ -52,8 +53,31 @@
     }
     return out;
   }
+  // A face with holes, cut: the holes the cut crosses are joined into its outline as notches (along the cut from one to the
+  // next, round each hole's kept part), so no edge of a hole lies on the outline's own cut edge. (Filled even-odd with
+  // both, the two coincident edges left a faint dotted line across each hole where the cut crosses it.) Rings are cut
+  // rings, their cut points marked; the first is the outline.
+  function mergeCut(rings) {
+    const cutAt = r => { for (let i = 0; i < r.length; i++) if (r[i].cut && r[(i + 1) % r.length].cut) return i; return -1; };
+    const [outer, ...holes] = rings, a = cutAt(outer);
+    if (a < 0) return rings;
+    const ring = [...outer.slice(a + 1), ...outer.slice(0, a + 1)], cA = ring[ring.length - 1], cB = ring[0];
+    const along = p => (p[0] - cA[0]) * (cB[0] - cA[0]) + (p[1] - cA[1]) * (cB[1] - cA[1]) + (p[2] - cA[2]) * (cB[2] - cA[2]);
+    const chains = [], rest = [];
+    for (const h of holes) {
+      const j = cutAt(h);
+      if (j < 0) { rest.push(h); continue; }
+      let L = [...h.slice(j + 1), ...h.slice(0, j + 1)];          // from one cut point round to the other
+      if (along(L[0]) > along(L[L.length - 1])) L = L.reverse();
+      chains.push(L);
+    }
+    chains.sort((p, q) => along(p[0]) - along(q[0]));
+    return [ring.concat(...chains), ...rest];
+  }
   // at the apron: side +1 keeps d >= 0 (out in the room), -1 keeps d <= 0 (inside the desk)
   const split = (poly, side) => splitAt(poly, 2, 0, side);
+  // what sampled() and outline() project through: P, but for a cartridge being lifted out of its recess (render, below)
+  let PR = P;
   // the outline of a split polygon: its real edges only, not the one along the cut
   function outline(poly) {
     let d = '';
@@ -61,7 +85,7 @@
       const a = poly[i], b = poly[(i + 1) % poly.length];
       if (a.cut && b.cut) continue;
       const n = Math.max(1, Math.ceil(Math.abs(b[0] - a[0]) / 0.06));
-      for (let k = 0; k <= n; k++) { const t = k / n, q = P([a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t, a[2] + (b[2] - a[2]) * t]); d += (k ? 'L' : 'M') + q[0].toFixed(2) + ',' + q[1].toFixed(2); }
+      for (let k = 0; k <= n; k++) { const t = k / n, q = PR([a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t, a[2] + (b[2] - a[2]) * t]); d += (k ? 'L' : 'M') + q[0].toFixed(2) + ',' + q[1].toFixed(2); }
     }
     return d;
   }
@@ -72,7 +96,7 @@
       const a = poly[i], b = poly[(i + 1) % poly.length], n = Math.max(1, Math.ceil(Math.abs(b[0] - a[0]) / 0.06));
       for (let k = 0; k < n; k++) { const t = k / n; out.push([a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t, a[2] + (b[2] - a[2]) * t]); }
     }
-    return out.map(P);
+    return out.map(PR);
   }
   // a rounded rectangle in the drawer's opening, at depth d, its corners r pixels round (the drawer fronts' 3 px)
   function roundUV(u0, u1, v0, v1, r, d) {
@@ -99,9 +123,9 @@
   // lies flat, cap toward you, label up. Its size is the slot's: carried there, its cap is the slot's own
   // opening (85 px wide and 40.7 thick at the apron, 0.14 of distance long).
   const CART = { w: 85 / OW, t: 40.7 / OH, len: 0.14 };
-  // The drawer holds a moulded case: a block filling it to INSERT.top, with a recess for each cartridge, four
-  // across and two deep. A cartridge sits in its recess with its top standing proud of the case; an empty
-  // recess keeps the cartridge's shape.
+  // The drawer holds a moulded case: a block filling it to INSERT.top, with a recess for each cartridge, four in
+  // the front row and three behind them (PLACES, below). A cartridge sits in its recess with its top standing proud
+  // of the case; an empty recess keeps the cartridge's shape.
   const INSERT = { top: 0.22, depth: 36 / OH };     // deep enough that a cartridge stands only 4.7 px proud
   const CLEAR = { u: 2 / OW, d: 0.0025 };          // the recess's play around the cartridge: a snug fit
   // a finger notch at the near end of each recess, a half circle 20 px across the apron (a pixel across is
@@ -110,10 +134,28 @@
   // two halves of a face meet without a hairline of background between them
   const SEAM = 0.006;
   const NOTCH = { u: 20 / OW, d: 20 / 1500, n: 10 };
-  const COLS = 4, ROWS = 2, SLOTS = COLS * ROWS;   // slot 0 is front left; the front row fills first
-  const COL_PITCH = 123 / OW;
+  const COLS = 4, ROWS = 2;
+  // The places (Arnold, 2026-10-11, from the stills: design.md section 5, "The last three cartridges, decided"): seven
+  // recesses, the front row of four, the back row of three centred under it, each back recess in the gap between two
+  // front ones (the front row's first three places moved half a pitch right, so each is over a front rim). Slot 0 is
+  // front left: PONG, DEFRAG, ROUTE, HEAP; behind, FIREWALL, POWER and the seventh. [column, row]; no eighth place.
+  const PLACES = [[0, 0], [1, 0], [2, 0], [3, 0], [0.5, 1], [1.5, 1], [2.5, 1]];
+  const SLOTS = PLACES.length;
+  // a face cut at the apron: its part inside the desk is filled a little past the cut (OVER, under the part out in the
+  // room, which is drawn over it), so the two halves meet with no hairline of background between their antialiased
+  // edges; its outline stops at the cut. (0.003 of distance is 1.6 px or more at the apron.)
+  const OVER = 0.003;
+  // The case laid out for the straps (design.md, "The cartridge straps", approved 2026-10-10; strap.js): the rim between
+  // recesses is 58 mm (40 as built before them), the widest the drawer holds, the row wall to wall: a divot 7.5 mm into
+  // the rim at each recess's left edge (the strap locks in there), its steel plate in the rim to its right, the first
+  // divot and the last plate 7.5 mm from the drawer's side walls. In u: a unit is 682.5 mm across, of d 1765 mm.
+  const MM_U = 682.5, MM_D = 1765;
+  const DIVOT = { u: 7.5 / MM_U, d: 92 / MM_D };   // how far into the rim, how far back from the recess's near edge
+  const WALL_MARGIN = 7.5 / MM_U;
   const GAP = { front: 0.035, row: 0.028, back: 0.022 };
   const RECESS = { w: CART.w + 2 * CLEAR.u, len: CART.len + 2 * CLEAR.d };
+  const CASE_RIM = (1 - 2 * WALL - COLS * RECESS.w - 2 * WALL_MARGIN) / COLS, COL_PITCH = RECESS.w + CASE_RIM;
+  const COL0 = WALL + WALL_MARGIN + DIVOT.u + RECESS.w / 2;   // the first recess's centre line
   const DEPTH = PLATE + GAP.front + ROWS * RECESS.len + (ROWS - 1) * GAP.row + GAP.back;
   const TRAVEL = DEPTH - GAP.back - 0.03;          // out until the back row is nearly clear of the apron
   const RISE = INSERT.top + INSERT.depth + 0.10;   // taking one: lifted until its underside clears the front
@@ -236,13 +278,25 @@
     return { inside, front: s };
   }
 
+  // the left pedestal's door alone (the console's supply, locked: a click rattles it, app.js), drawn as pedestal() draws it,
+  // to be moved a couple of pixels while a backing in the pedestal's face covers the still one under it (3 px wider all
+  // round: its seam lines and its pull); hit, its face to click
+  function door() {
+    const dr = PED.door, e = 3;
+    return { back: `<polygon points="${pts(rect(dr[0] - e, dr[1] + e, dr[2] - e, dr[3] + e))}" fill="#F0F0EE"/>`,
+      face: `<polygon points="${pts(rect(dr[0], dr[1], dr[2], dr[3]))}" fill="#F4F4F2" ${INK}/>` + pull(dr[1] - 30, dr[1] - 17, dr[2] + 70, dr[2] + 160),
+      hit: pts(rect(dr[0], dr[1], dr[2], dr[3])) };
+  }
+
   // the desk top, its front face, and the apron: static, drawn once. With pedestal, the pedestal desk; with tally,
   // that many marks scratched into the desk's edge
   function desk({ pedestal: ped = true, tally: marks = 0, fileFront = true, tanker = false } = {}) {
     TANKER = tanker;
     const xs = []; for (let x = DESK.X0; x <= DESK.X1 + 1; x += 20) xs.push(x);
     const line = f => xs.map(x => [x, f(x)]);
-    const top = [[DESK.X0, 1150], [DESK.X1, 1150], ...line(DESK.edge).reverse()];
+    // (from 1040 down to the edge: the edge comes up to 1060 at the 2560 frame's sides; it was from 1150 when the desk stopped
+    // at the 1920 frame's. The drawing's desk runs down to 1200 under it, the same #FBFBFB, so the change shows nowhere.)
+    const top = [[DESK.X0, 1040], [DESK.X1, 1040], ...line(DESK.edge).reverse()];
     const face = [...line(DESK.edge), ...line(DESK.lip).reverse()];
     const apron = [...line(DESK.lip), [DESK.X1, DESK.bottom], [DESK.X0, DESK.bottom]];
     const hole = TANKER ? roundUV(0, 1, 0, 1, R_DRAWER, 0) : sampled([[0, 0, 0], [1, 0, 0], [1, 1, 0], [0, 1, 0]]);
@@ -257,21 +311,24 @@
 
   // slot i's recess, for a drawer out by D: its centre across, and its near and far ends
   function recessAt(i, D) {
-    const col = i % COLS, row = Math.floor(i / COLS);
-    const uc = 0.5 + (col - (COLS - 1) / 2) * COL_PITCH;
+    const [col, row] = PLACES[i];
+    const uc = COL0 + col * COL_PITCH;
     const near = D - PLATE - GAP.front - row * (RECESS.len + GAP.row);
     return { uc, u0: uc - RECESS.w / 2, u1: uc + RECESS.w / 2, near, far: near - RECESS.len };
   }
-  // the recess's outline at height v, far edge first, with the notch bulging out of its near edge toward you
+  // the recess's outline at height v, far edge first, with the notch bulging out of its near edge toward you and the
+  // divot cut into the rim at its left edge, from its near edge back
   function recessRing(r, v) {
     const arc = [];
     for (let k = 0; k <= NOTCH.n; k++) { const a = Math.PI * k / NOTCH.n; arc.push([r.uc + NOTCH.u * Math.cos(a), v, r.near + NOTCH.d * Math.sin(a)]); }
-    return [[r.u0, v, r.far], [r.u1, v, r.far], [r.u1, v, r.near], ...arc, [r.u0, v, r.near]];
+    return [[r.u0, v, r.far], [r.u1, v, r.far], [r.u1, v, r.near], ...arc, [r.u0, v, r.near], [r.u0 - DIVOT.u, v, r.near], [r.u0 - DIVOT.u, v, r.near - DIVOT.d], [r.u0, v, r.near - DIVOT.d]];
   }
 
-  /* state: { travel: 0..1, carts: [{ slot, label, lift }] }
+  /* state: { travel: 0..1, carts: [{ slot, label, lift }], straps: { [slot]: { t, tug } } } (each recess's strap: t 0
+     strapped, 1 released and at rest; tug, mm, lifts it with its cartridge; strap.js draws it)
      returns { inner, outer, front, hole, hits, frontHit }: inner is clipped to the hole; outer and front
      (the drawer front and its handle) are drawn over the desk. */
+  const STRAPS = new Map();
   function render(state) {
     const D = TRAVEL * state.travel, back = D - DEPTH;
     const inner = [], outer = [];
@@ -289,8 +346,8 @@
         if (part.length < 3) continue;
         const sp = sampled(part);
         if (area(sp) <= 0.05) continue;
-        const whole = !part.some(p => p.cut);
-        const svg = `<polygon points="${pts(sp)}" fill="${fill}"${whole ? ' ' + INK : ''}/>`
+        const whole = !part.some(p => p.cut), fp = !whole && side < 0 ? splitAt(f, 2, OVER, -1) : null;
+        const svg = `<polygon points="${pts(fp ? sampled(fp) : sp)}" fill="${fill}"${whole ? ' ' + INK : ''}/>`
           + (!whole ? `<path d="${outline(part)}" fill="none" ${INK} stroke-linecap="round"/>` : '');
         (side < 0 ? inner : outer).push([layer, key, svg]);
       }
@@ -300,7 +357,8 @@
       for (const side of [-1, 1]) {
         const parts = rings.map(r => split(r, side)).filter(p => p.length >= 3);
         if (!parts.length || split(rings[0], side).length < 3) continue;
-        const d = parts.map(p => 'M' + sampled(p).map(q => q[0].toFixed(2) + ',' + q[1].toFixed(2)).join('L') + 'Z').join('');
+        const fills = mergeCut((side < 0 ? rings.map(r => splitAt(r, 2, OVER, -1)) : rings.map(r => split(r, side))).filter(p => p.length >= 3));
+        const d = fills.map(p => 'M' + sampled(p).map(q => q[0].toFixed(2) + ',' + q[1].toFixed(2)).join('L') + 'Z').join('');
         (side < 0 ? inner : outer).push([layer, key, `<path d="${d}" fill="${fill}" fill-rule="evenodd"/>`
           + `<path d="${parts.map(outline).join('')}" fill="none" ${INK} stroke-linecap="round"/>`]);
       }
@@ -324,7 +382,9 @@
         (r.near + r.far >= 0 ? outer : inner).push([SUNK, k + 2e-5, scratched(state.scratch.lines, ([x, y]) => P([u0 + (u1 - u0) * x / 100, vB - 0.001, d0 + (d1 - d0) * y / 100]))]);
       }
       face([[r.u0, vT, r.far], [r.u1, vT, r.far], [r.u1, vB, r.far], [r.u0, vB, r.far]], '#D2D2D0', SUNK, k + 1e-5);
-      face([[r.u0, vT, r.far], [r.u0, vB, r.far], [r.u0, vB, r.near], [r.u0, vT, r.near]], '#D6D6D4', SUNK, k + 1e-5);
+      // the left wall behind the divot (the divot runs from the recess's near edge back, and is drawn as the slot is: a
+      // dark mouth, no walls inside)
+      face([[r.u0, vT, r.far], [r.u0, vB, r.far], [r.u0, vB, r.near - DIVOT.d], [r.u0, vT, r.near - DIVOT.d]], '#D6D6D4', SUNK, k + 1e-5);
       face([[r.u1, vT, r.near], [r.u1, vB, r.near], [r.u1, vB, r.far], [r.u1, vT, r.far]], '#D6D6D4', SUNK, k + 1e-5);
       rings.push(recessRing(r, vT));
     }
@@ -333,7 +393,16 @@
     // the cartridges; what is below the case's top is drawn with the recesses, so the case hides it
     const hits = [];
     for (const c of state.carts) {
+      if (!PLACES[c.slot]) continue;                   // (no such place: the case has seven)
       const { uc, v0, v1, dNear, dFar } = cartBox(c, D), key = dNear;
+      // lifted out of its recess, a cartridge goes from the drawer's bend (it sits in its recess as the recess is drawn) to
+      // the rigid box in the camera it is carried as (drawer.js renderCartridge), in step with the lift, so the hand-over
+      // at the top has nothing left to jump (the bend tilts a cartridge's edges up to 5 px against the level box)
+      if (c.lift > 0) {
+        const pose = cartPose(c, D / TRAVEL), vm = (v0 + v1) / 2, e = Math.min(1, c.lift);
+        const level = p => proj([pose.x + (p[0] - uc) / CART.w * pose.w, pose.y + (p[1] - vm) / CART.t * pose.t, CAM.z0 * (1 - p[2])]);
+        PR = p => { const a = P(p), b = level(p); return [a[0] + (b[0] - a[0]) * e, a[1] + (b[1] - a[1]) * e]; };
+      }
       const b = box(uc - CART.w / 2, uc + CART.w / 2, v0, v1, dFar, dNear);
       face(b.left, '#DEDEDC', CARTS, key, SUNK); face(b.right, '#DEDEDC', CARTS, key, SUNK);
       face(b.front, '#ECECEA', CARTS, key, SUNK);                                   // the cap, as in the slot
@@ -343,7 +412,7 @@
       const sticker = [[u0, v0, lf], [u1, v0, lf], [u1, v0, ln], [u0, v0, ln]];
       face(sticker, '#FAFAF9', CARTS, key + 1e-5);
       if (c.label) {
-        const o = P([u0, v0, lf]), ax = P([u1, v0, lf]), ay = P([u0, v0, ln]), W = 100, H = 60;
+        const o = PR([u0, v0, lf]), ax = PR([u1, v0, lf]), ay = PR([u0, v0, ln]), W = 100, H = 60;
         const m = [(ax[0] - o[0]) / W, (ax[1] - o[1]) / W, (ay[0] - o[0]) / H, (ay[1] - o[1]) / H, o[0], o[1]].map(n => n.toFixed(4));
         const note = state.notes && state.notes[c.label];
         (split(sticker, 1).length >= 3 ? outer : inner).push([CARTS, key + 2e-5, labelText(m, c.label, '', note ? 31 : 38) + (note ? stickerNote(m, note) : '')]);
@@ -357,14 +426,34 @@
           for (const side of [-1, 1]) {
             const part = split(half, side); if (part.length < 3) continue;
             const sp = sampled(part); if (area(sp) <= 0.05) continue;
-            (side < 0 ? inner : outer).push([layer, key + 1e-5, `<polygon points="${pts(sp)}" fill="#D2D2D0"/>`]);
+            const fp = side < 0 && part.some(p => p.cut) ? sampled(splitAt(half, 2, OVER, -1)) : sp;
+            (side < 0 ? inner : outer).push([layer, key + 1e-5, `<polygon points="${pts(fp)}" fill="#D2D2D0"/>`]);
           }
         }
       };
       cap(0.08, 0.92, 0.18, 0.34); cap(0.08, 0.50, 0.68, 0.76); cap(0.62, 0.92, 0.68, 0.76);
       if (!c.lift && D > 0.05) hits.push({ slot: c.slot, points: pts(hull([...b.top, ...b.front].map(P))) });
+      PR = P;
     }
 
+    // the straps (strap.js): the steel plate, the slot and the divot's mouth on the case's top; the webbing and the latch
+    // plate over their cartridge, just after it. Each side of the apron drawn on its own.
+    // (drawn exactly when still, and kept; while the drawer slides or a strap moves, state.fast or the strap's own fast
+    // draws it from coarser samples, under 0.05 px from the exact)
+    const strapJoints = [];
+    if (state.straps && window.strapA) for (const slot of Object.keys(state.straps)) {
+      if (!PLACES[+slot]) continue;
+      const r = recessAt(+slot, D), st = state.straps[slot], fast = !!(state.fast || st.fast);
+      for (const side of [-1, 1]) {
+        const key = [slot, side, D.toFixed(7), st.t, st.tug || 0, r.uc].join('|');
+        let o = fast ? null : STRAPS.get(key);
+        if (!o) { o = window.strapA.draw({ P, r, rest: recessAt(+slot, TRAVEL), side, t: st.t, tug: st.tug || 0, fast }); if (!fast) { if (STRAPS.size > 64) STRAPS.clear(); STRAPS.set(key, o); } }
+        const to = side < 0 ? inner : outer;
+        strapJoints.push({ slot: +slot, t: st.t, joints: o.joints });
+        if (o.case) to.push([CASE, 0.5 + slot * 1e-3, o.case]);
+        if (o.carts) to.push([CARTS, r.near - CLEAR.d + 3e-5, o.carts]);
+      }
+    }
     // the drawer front and its handle
     const plate = box(0, 1, 0, 1, D - PLATE, D);
     const front = [];
@@ -396,7 +485,7 @@
     return {
       inner: order(inner), outer: order(outer), front: front.join(''),
       hole: pts(state.tanker ? roundUV(0, 1, 0, 1, R_DRAWER, 0) : sampled([[0, 0, 0], [1, 0, 0], [1, 1, 0], [0, 1, 0]])),
-      hits, frontHit: pts(sampled(plate.front)),
+      hits, frontHit: pts(sampled(plate.front)), strapJoints,
     };
   }
 
@@ -440,9 +529,10 @@
   // how far out of the slot (in the slot code's k) it is when its back end is level with the slot's face
   const clearOfSlot = (size, slotW) => { const zc = CAM.f * size.w / slotW; return size.L / (zc - size.L); };
 
-  // the name on a cartridge's sticker: one lettering for every cartridge, sized so the longest name (COOLANT,
-  // seven letters) sits inside the sticker with a margin; shorter names are the same size, centred. The sticker is
-  // a 100 x 60 box mapped onto the top by m.
+  // the name on a cartridge's sticker: one lettering for every cartridge, sized so the longest name (FIREWALL, eight
+  // letters: 87.2 of the 88 by the estimate below) sits inside the sticker at its own width; shorter names are the same
+  // size, centred (Arnold, 2026-10-11: 16.5 px, a size smaller than the 19 it was, so all six match). The sticker is a
+  // 100 x 60 box mapped onto the top by m.
   // handwriting (hand.js) mapped onto a surface by map([x, y]) -> screen
   function inked(lines, map, stroke = '#B4B4B4', width = 1) {
     const d = lines.map(l => l.map((p, i) => (i ? 'L' : 'M') + map(p).map(n => n.toFixed(2)).join(',')).join('')).join('');
@@ -476,7 +566,7 @@
     const words = note.split(' '), half = Math.ceil(words.length / 2), rows = [words.slice(0, half).join(' '), words.slice(half).join(' ')];
     return rows.map((t, j) => `<text transform="matrix(${m.join(' ')}) scale(${aspect.toFixed(4)} 1)" x="${(50 / aspect).toFixed(2)}" y="${45 + j * 10}" text-anchor="middle" font-family="Caveat, cursive" font-size="12" fill="#8E8E8C">${weathered(t, 3 + j)}</text>`).join('');
   }
-  const LABEL = { size: 19, spacing: 1, maxW: 88 };
+  const LABEL = { size: 16.5, spacing: 1, maxW: 88 };
   function labelText(m, label, extra = '', y = 38) {
     const fit = label.length * (LABEL.size * .6 + LABEL.spacing) > LABEL.maxW ? ` textLength="${LABEL.maxW}" lengthAdjust="spacingAndGlyphs"` : '';
     return `<text transform="matrix(${m.join(' ')})" x="50" y="${y}" text-anchor="middle" font-family="ui-monospace, Consolas, monospace" font-size="${LABEL.size}" font-weight="600" letter-spacing="${LABEL.spacing}" fill="#8E8E8C"${fit}${extra}>${label}</text>`;
@@ -589,7 +679,7 @@
   // desk's bend. From a seated eye a deep, low drawer never shows its floor (pulled out, its front hides everything
   // in it below its top edge), so it is full of hanging files, the old operators' (initials on their tabs), and
   // whatever is left in it lies on top of them.
-  const FILE = { x0: 1240, x1: 1480, y0: 1665, y1: 1995, rim: 1665, tops: 1685, wall: 8, plate: .012, depth: .28, travel: .16 };   // (out .16: at 4:3 the files and what lies on them stay in view)
+  const FILE = { x0: 1240, x1: 1480, y0: 1665, y1: 1995, rim: 1665, tops: 1685, wall: 8, plate: .012, depth: .28, travel: .18 };   // (out .18: at 4:3 the files and what lies on them stay in view, and Glenn's tab, the nearest, shows whole over the front, 6.97 px clear; at .16 it was 0.2 px behind it)
   const boxF = (x0, x1, y0, y1, d0, d1) => ({
     front: [[x0, y0, d1], [x1, y0, d1], [x1, y1, d1], [x0, y1, d1]],
     top:   [[x0, y0, d0], [x1, y0, d0], [x1, y0, d1], [x0, y0, d1]],
@@ -684,7 +774,7 @@
     const m = [ax[0] - o[0], ax[1] - o[1], ay[0] - o[0], ay[1] - o[1], o[0], o[1]].map(n => n.toFixed(3));
     const [cx, cy, cw, ch] = photo.crop || [180, 0, 1080, 1080];
     return `<g transform="matrix(${m.join(' ')})"><svg x="0" y="0" width="1" height="1" viewBox="${cx} ${cy} ${cw} ${ch}" preserveAspectRatio="none" overflow="hidden">`
-      + `<image href="${photo.src || 'scene.svg'}" x="-240" y="0" width="1920" height="1080"/></svg></g>`
+      + `<image href="${photo.src || 'scene.svg'}" x="-560" y="0" width="2560" height="1080"/></svg></g>`
       + `<polygon points="${pts([o, ax, [ax[0] + ay[0] - o[0], ax[1] + ay[1] - o[1]], ay])}" fill="none" stroke="#D6D6D4" stroke-width=".8"/>`;
   }
 
@@ -711,25 +801,33 @@
   })();
   // back to front: whose, how thick (back flap to front flap, in depth), which cut, how many sheets. A sheet or two
   // each: every edge in the stack stands 6 px or more from the next on screen, or two lines read as one doubled.
-  const WHO = [['you', .007, 2, 1], ['m', .007, 0, 0], ['aw', .007, 1, 1], ['rd', .013, 0, 2], ['jk', .007, 1, 1], ['ts', .007, 0, 1]];
+  // Glenn's folder (design.md, "Glenn's folder, decided"): an operator 1979 to 1987, the oldest, so nearest you, in front
+  // of ts's, its tab on the first cut under ts's. jk's tab has a cut of its own (the fourth), 58 px in from the drawer's
+  // wall: on the second cut it ran past the 4:3 frame.
+  const WHO = [['you', .007, 2, 1], ['m', .007, 0, 0], ['aw', .007, 1, 1], ['rd', .013, 0, 2], ['jk', .007, 3, 1], ['ts', .007, 0, 1], ['glenn', .007, 0, 1]];
+  const OLD = ['ts', 'jk', 'rd', 'aw', 'glenn'];
+  // each old operator's tab: two letters, in Caveat
+  const TAB_OF = { glenn: 'gl' };
   // The old operators' sheets are their letters (Arnold, 2026-10-04; letters.js): each folder's sheets as the real papers
   // in it: each its width in mm, or { w, at, sink } with at its centre's offset in px from the folder's middle, sink how
   // far lower it stands (px), and down: true for one that sits too low in its folder to be seen (it keeps its place in
   // the stack's spacing, and is not drawn); a folder not named keeps its sheets as they are. Placed by
   // `node audit-letters.js search`: every sheet's seen corners and ends 6 px or more from every seen line; ts's can't
-  // stand clear of the drawer's front anywhere, so it sits low, unseen; rd's second, blank sheet is gone.
+  // stand clear of the drawer's front anywhere, so it sits low, unseen, and so does Glenn's (the nearest folder); rd's second,
+  // blank sheet is gone. With Glenn's folder (2026-10-10): rd's letter 1 px higher (jk's tab ran 5.8 px under its top
+  // edge), jk's and aw's slid right and your blank form A5, so no tab on the first cut runs under the sheet behind it.
   // (window.FILE_PAPERS: a stills page or an audit may try another; {} is the folders as they were before the letters)
-  const LETTER_PAPERS = { ts: [{ w: 216, at: -16, down: true }], rd: [{ w: 216, at: 4 }], jk: [{ w: 152, at: -26 }], aw: [{ w: 140, at: -28 }] };
+  const LETTER_PAPERS = { ts: [{ w: 216, at: -16, down: true }], rd: [{ w: 216, at: 4, sink: -1 }], jk: [{ w: 152, at: 36 }], aw: [{ w: 140, at: 36 }], you: [{ w: 148, at: 32 }], glenn: [{ w: 216, at: -16, down: true }] };
   const PAPERS_MM = window.FILE_PAPERS !== undefined ? window.FILE_PAPERS : LETTER_PAPERS;
   // the folders' places, worked out once with the drawer fully out (they keep them while it moves)
   let STACK = null;
   function fileStack() {
     if (STACK) return STACK;
     const { x0, x1, rim, tops, wall, plate } = FILE, xi0 = x0 + wall, xi1 = x1 - wall, D = FILE.travel;
-    // two cuts for the old operators; yours, at the back, its own: the drawer's back corner (the line where its back
+    // two cuts for the old operators (and jk's, the fourth, below); yours, at the back, its own: the drawer's back corner (the line where its back
     // meets the far wall) comes down onto your tab's flat top, clear of both shoulders, and the tab clear of the photo
     // filed there
-    const cuts = [xi0 + 18, xi0 + 18 + TAB.w + 20, xi0 + 108], XS = [xi0, (xi0 + xi1) / 2, xi1], GAP = 6;
+    const cuts = [xi0 + 18, xi0 + 18 + TAB.w + 20, xi0 + 108, xi0 + 58], XS = [xi0, (xi0 + xi1) / 2, xi1], GAP = 6;
     const build = fb0 => {
       let w = 11; const r = () => (w = (w * 16807) % 2147483647) / 2147483647;
       const out = []; let fb = fb0;
@@ -769,15 +867,16 @@
   // turned 47 degrees, found by audit-loose.html against the drawer as drawn: across the folders' stripes (a line every
   // 6 px) its edges cross each one decisively, every corner has 3 px of clear background round it, and no tab's curve
   // is half under it. (A gentler turn crossed the stripes too shallowly, and its corners landed on lines.)
-  const LOOSE = { x: .335, d: .604, rot: .83 }, FILED = { x: 1300, rise: 40, lean: .05 };
+  // (2026-10-10: d .532, turned .80, with the drawer out to .18: the same spot in the room, its corners 3.00 px clear)
+  const LOOSE = { x: .335, d: .532, rot: .8 }, FILED = { x: 1300, rise: 40, lean: .05 };
 
   /* the file drawer, out by travel 0..1. lock: { key, turn } (the key in the lock, turned 0..1); photos: [{ photo,
      filed }] (loose on the folders, or standing in your folder); initials: on your tab (blank until something is
-     filed); lifted: whose sheet is out of its folder (not drawn); yours: your folder can be clicked too (something is filed
+     filed); lifted: whose sheet is out of its folder (not drawn), or whose empty folder (drawn as liftedSvg, if any); yours: your folder can be clicked too (something is filed
      in it out of sight: the award slip). Returns { opening, inner (clip to hole), outer, front,
      hole, hits: { front, loose, filed, folders: [{ who, points }] } }. */
   let TAB_IDS = 0;
-  function renderFile({ travel = 0, lock = {}, photos = [], initials = '', lifted = null, yours = false } = {}) {
+  function renderFile({ travel = 0, lock = {}, photos = [], initials = '', lifted = null, yours = false, liftedSvg = '' } = {}) {
     const { x0, x1, y0, y1, rim, tops, wall, plate, depth } = FILE;
     const D = FILE.travel * travel, back = D - depth, dn = D - plate, xi0 = x0 + wall, xi1 = x1 - wall;
     const inner = [], outer = [], hits = {};
@@ -811,14 +910,18 @@
         return p;
       };
       const filed = photos.filter(p => p.filed);
+      let filedAt = null;
       files.forEach(f0 => {
+        // (an empty folder is lifted out whole: M.'s, letters.js draws it; while it rises, liftedSvg, it is drawn here, in its
+        // place in the drawer's order, so the folders before it and the drawer's walls cover it as they covered it in place)
+        if (f0.who === lifted && !f0.papers.length) { if (liftedSvg) across(f0.fb + D, liftedSvg); return; }
         const f = { ...f0, fb: f0.fb + D, fd: f0.fd + D }, tx = cuts[f.cut], edge = crest(tx, tops);
         // the back flap, the tab its own top edge; its line runs down its right end, where it meets the far wall
         across(f.fb, `<polygon points="${p3(at(f.fb, [...edge, [xi1, tops + 80], [xi0, tops + 80]]))}" fill="#E9E9E7"/>` + line(at(f.fb, [...edge, [xi1, tops + 80]])));
         // the old operators' initials in Caveat, handwritten, as the polaroids' strips are; yours typed, in the company's
         // lettering (Arnold, 2026-10-02: done while you were away), capitals; centred on the tab and mapped onto its plane
         // as the strips are; clipped to it. Your tab is blank until the night after something is filed.
-        const text = f.who === 'you' ? initials.toUpperCase() : f.who, typed = f.who === 'you';
+        const text = f.who === 'you' ? initials.toUpperCase() : TAB_OF[f.who] || f.who, typed = f.who === 'you';
         if (text) {
           const base = []; for (let n = Math.ceil(TAB.w / 2), q = n; q >= 0; q--) base.push([tx + TAB.w * q / n, tops]);
           const tabPoly = [...crest(tx, tops).filter(([x]) => x > tx && x < tx + TAB.w), ...base];
@@ -833,7 +936,7 @@
           if (it.paper) {
             const p = it.paper, top = crest(null, p.y, p.a, p.b);
             across(it.d, `<polygon points="${p3(at(it.d, [...top, [p.b, tops + 80], [p.a, tops + 80]]))}" fill="#FAFAF9"/>` + line(at(it.d, [[p.a, tops + 80], ...top, [p.b, tops + 80]])));
-          } else { const s = polaroidStanding({ ...FILED, d: it.d, photo: it.photo.photo }); across(it.d, s.svg); hits.filed = s.hit; }
+          } else { const s = polaroidStanding({ ...FILED, d: it.d, photo: it.photo.photo }); across(it.d, s.svg); hits.filed = s.hit; filedAt = { ring: s.ring, d: it.d }; }
         }
         // the front flap, shorter: its top edge and its right end
         const front = crest(null, tops + FL);
@@ -843,7 +946,8 @@
       // its back flap's edge, tab and all, down to the next folder's edge (the nearest, down to the drawer front's top)
       hits.folders = [];
       files.forEach((f0, i) => {
-        if (!['ts', 'jk', 'rd', 'aw'].includes(f0.who) && !(yours && f0.who === 'you')) return;
+        // (M.'s too, empty: it is lifted out whole and shown so; Arnold, 2026-10-10)
+        if (!OLD.includes(f0.who) && f0.who !== 'm' && !(yours && f0.who === 'you')) return;
         const top = at(f0.fb + D, crest(cuts[f0.cut], tops)), next = files[i + 1];
         const bottom = next ? at(next.fb + D, crest(cuts[next.cut], tops)) : at(dn, crest(null, rim));
         hits.folders.push({ who: f0.who, points: p3([...top, ...bottom.reverse()]) });
@@ -854,7 +958,31 @@
         const H = 107 / PX_MM, cy = tops - rise + H / 2;
         const o = (mx, my) => { const px = mx / PX_MM, py = my / PX_MM, c = Math.cos(lean), s = Math.sin(lean); return F([x + px * c - py * s, cy + px * s + py * c, d]); };
         const ring = ringOf(o);
-        return { svg: `<polygon points="${p3(ring)}" fill="#FAFAF9" ${INK}/>` + photoIn(o(-39.5, -47.5), o(39.5, -47.5), o(-39.5, 31.5), photo), hit: p3(ring) };
+        return { svg: `<polygon points="${p3(ring)}" fill="#FAFAF9" ${INK}/>` + photoIn(o(-39.5, -47.5), o(39.5, -47.5), o(-39.5, 31.5), photo), hit: p3(ring), ring };
+      }
+      // where the filed photo can be clicked: only the part of it you see (playtest round 3, 2026-10-10: its whole card,
+      // hidden lower part and all, lay over aw's and M.'s folders, so a click on them lifted the photo). Under every line
+      // in front of it (your form, your front flap, each nearer folder's flaps and sheets, the drawer front's top) and,
+      // while it is inside the pedestal, below the opening's top edge; found a column every half pixel, its largest piece
+      if (filedAt) {
+        const iy = files.findIndex(f => f.who === 'you'), fy = files[iy], occ = [];
+        for (const p of fy.papers) if (!p.down && p.d + D > filedAt.d) occ.push(at(p.d + D, crest(null, p.y, p.a, p.b)));
+        occ.push(at(fy.fd + D, crest(null, tops + FL)));
+        for (const f of files.slice(iy + 1)) {
+          occ.push(at(f.fb + D, crest(cuts[f.cut], tops)));
+          if (f.who !== lifted) for (const p of f.papers) if (!p.down) occ.push(at(p.d + D, crest(null, p.y, p.a, p.b)));
+          occ.push(at(f.fd + D, crest(null, tops + FL)));
+        }
+        occ.push(at(dn, crest(null, rim, x0, x1)));
+        const ceil = filedAt.d < 0 ? at(0, crest(null, y0, x0, x1)) : [];                // (inside the pedestal, clipped by its opening)
+        const ysAt = (pl, x, closed) => { const ys = []; for (let i = closed ? 0 : 1; i < pl.length; i++) { const a = pl[(i || pl.length) - 1], b = pl[i]; if (a[0] !== b[0] && (x - a[0]) * (x - b[0]) <= 0) ys.push(a[1] + (b[1] - a[1]) * (x - a[0]) / (b[0] - a[0])); } return ys; };
+        const ring = filedAt.ring, xs = ring.map(p => p[0]), runs = []; let run = null;
+        for (let x = Math.min(...xs) + .25; x < Math.max(...xs); x += .5) {
+          const ys = ysAt(ring, x, true), lo = Math.max(Math.min(...ys), ...ysAt(ceil, x)), hi = Math.min(Math.max(...ys), ...occ.flatMap(pl => ysAt(pl, x)));
+          if (ys.length >= 2 && hi - lo > .5) { if (!run) runs.push(run = []); run.push([x, lo, hi]); } else run = null;
+        }
+        const big = runs.sort((a, b) => b.length - a.length)[0];
+        if (big) hits.filedSeen = p3([...big.map(([x, lo]) => [x, lo]), ...big.slice().reverse().map(([x, , hi]) => [x, hi])]);
       }
       // what lies loose on the folders rests on the tabs, the highest things there
       for (const p of photos.filter(p => !p.filed)) {
@@ -906,6 +1034,23 @@
     lines.push(at(D - plate, front));
     return lines;
   }
+  // a folder's own top edges as renderFile draws them, the drawer all the way out: its back flap's (the tab and all) and
+  // its front flap's, left to right, in pedestal px, with their depths (letters.js lifts M.'s empty folder out whole)
+  function folderEdges(who) {
+    const { x0, x1, tops, wall } = FILE, D = FILE.travel, xi0 = x0 + wall, xi1 = x1 - wall;
+    const { files, cuts } = fileStack(), f = files.find(f => f.who === who);
+    const crest = (tx, y) => {
+      const p = [], run = (u0, u1, yy) => { const n = Math.max(1, Math.ceil((u1 - u0) / 2)); for (let k = p.length ? 1 : 0; k <= n; k++) p.push([u0 + (u1 - u0) * k / n, yy]); };
+      if (tx == null) { run(xi0, xi1, y); return p; }
+      run(xi0, tx, y);
+      for (const [a, u] of SHOULDER.slice(1)) p.push([tx + a, y - u]);
+      run(tx + TAB.shoulder, tx + TAB.w - TAB.shoulder, y - TAB.h);
+      for (const [a, u] of SHOULDER.slice().reverse().slice(1)) p.push([tx + TAB.w - a, y - u]);
+      run(tx + TAB.w, xi1, y);
+      return p;
+    };
+    return { back: crest(cuts[f.cut], tops), front: crest(null, tops + FL), fb: f.fb + D, fd: f.fd + D, tx: cuts[f.cut], xi0, xi1, tops };
+  }
   /* a polaroid as a card in the camera, for when it moves (lifted out of the drawer, held up, filed): pose { c, A, B } in
      camera space, A along its width, B down it toward the strip, in polaroid millimetres; its picture faces -(A x B).
      Its edges sampled at the same points as the drawer's (every 2 px), so the room's bend curves them alike and the
@@ -942,7 +1087,8 @@
     if (photo.strip) svg += stripText(photo.strip, o(0, 44), o(1, 44), o(0, 45));
     return svg;
   }
-  window.deskDrawer = { LK, pullAt: pull, desk, render, P, F, slots: SLOTS, cartPose, slotPose, clearOfSlot, renderCartridge, renderCartridgeSolid, greyOf, proj, flight, renderFile, fileStack, inFrontOf, lockKey, renderCard, photoPose, polaroidHeld, FILE, TRAVEL, LOCK, LOOSE, FILED, TAB, FL, toCamF, roomF };
+  const tugLift = mm => mm / 129.43 / RISE;           // (a mm up, as a lift: v is 129.43 mm a unit)
+  window.deskDrawer = { door, LK, tugLift, COL_PITCH, COL0, DIVOT, recessAt, places: PLACES, pullAt: pull, desk, render, P, F, slots: SLOTS, cartPose, slotPose, clearOfSlot, renderCartridge, renderCartridgeSolid, greyOf, proj, flight, renderFile, fileStack, inFrontOf, folderEdges, lockKey, renderCard, photoPose, polaroidHeld, FILE, TRAVEL, LOCK, LOOSE, FILED, TAB, FL, toCamF, roomF };
 
 
   // Motion, shared by the page and audit-drawer.js. A hand pull starts from rest and arrives at the slide's
