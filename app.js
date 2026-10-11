@@ -7984,10 +7984,14 @@
     // the move).
     let flight = null;
     // (frames, or half a second: a hidden tab has none, and the eyes would stay shut until it was shown again)
-    // the swap's slow frame come and gone: a frame over 40 ms, then six in a row under 25 ms (the GPU caught up: two were not enough, a second, smaller slow frame came after them); 350 ms with
-    // no slow frame (a machine quick enough not to have one); or 1.5 s. (Two quick frames alone came too soon: the page runs a
+    // the swap's slow frame come and gone: a slow frame, then four in a row at the machine's own pace (the GPU caught up: two were not enough, a second, smaller slow frame came after them); 350 ms with
+    // no slow frame (a machine quick enough not to have one); or 0.7 s at most. (Two quick frames alone came too soon: the page runs a
     // few frames ahead before the GPU's stall holds it, and the eyes opened inside the stall, all at once.)
-    const steady = () => Promise.race([new Promise(done => { const t0 = performance.now(); let last = 0, ok = 0, slow = false; const step = t => { if (last) { const d = t - last; if (d > 40) slow = true; ok = d < 25 ? ok + 1 : 0; } last = t; if ((slow && ok >= 6) || (!slow && t - t0 > 350)) done(); else requestAnimationFrame(step); }; requestAnimationFrame(step); }), wait(1500)]);
+    // (measured against this machine's own frames during the move, frameMs: their median. With 25 and 40 ms fixed, a machine
+    // drawing 20 ms frames never counted six steady ones, and the eyes stayed shut 1.5 s)
+    let frameMs = [];
+    const steady = () => { const f = [...frameMs].sort((a, b) => a - b), base = f.length ? f[f.length >> 1] : 16.7, slowAt = Math.max(40, 2.5 * base), okAt = Math.max(25, 1.5 * base);
+      return Promise.race([new Promise(done => { const t0 = performance.now(); let last = 0, ok = 0, slow = false; const step = t => { if (last) { const d = t - last; if (d > slowAt) slow = true; ok = d < okAt ? ok + 1 : 0; } last = t; if ((slow && ok >= 4) || (!slow && t - t0 > 350)) done(); else requestAnimationFrame(step); }; requestAnimationFrame(step); }), wait(700)]); };
     const nextFrames = n => Promise.race([new Promise(done => { const step = () => (n-- <= 0 ? done() : requestAnimationFrame(step)); requestAnimationFrame(step); }), wait(500)]);
     const mul = (A, B) => [A[0] * B[0] + A[2] * B[1], A[1] * B[0] + A[3] * B[1], A[0] * B[2] + A[2] * B[3], A[1] * B[2] + A[3] * B[3], A[0] * B[4] + A[2] * B[5] + A[4], A[1] * B[4] + A[3] * B[5] + A[5]];
     function fly() {
@@ -8123,8 +8127,10 @@
       // then opening, they jumped open; the final sweep's live audit)
       const settle = async () => { if (rested) return; rested = true; await nextFrames(2); rest(); await steady(); };
       SEQ.blinks.forEach((b, i) => setTimeout(() => eyes.blink(i === SEQ.blinks.length - 1 ? { ...b, whileShut: settle } : b), b.at * 1000));
+      let prevT = 0; frameMs = [];
       (function tick() {
-        const s = (performance.now() - pullAt) / 1000;
+        const now = performance.now(), s = (now - pullAt) / 1000;
+        if (prevT) { frameMs.push(now - prevT); if (frameMs.length > 40) frameMs.shift(); } prevT = now;
         if (s >= SEQ.pull[1]) { pose(SEQ.pull[1]); return; }
         pose(s); requestAnimationFrame(tick);
       })();
