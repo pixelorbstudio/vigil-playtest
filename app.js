@@ -783,10 +783,11 @@
   const stepFrom = (rest, dir) => { const rs = rests(), i = rs.findIndex(r => Math.abs(r - rest) < 1); return rs[clamp((i < 0 ? 0 : i) + dir, 0, rs.length - 1)]; };
   // the edges: an arrow cursor, a lean toward the other rest, and a click to go there
   const zones = { down: document.createElement('div'), up: document.createElement('div') };
+  const camHover = () => !!cam?.hover;
   for (const [name, z] of Object.entries(zones)) {
     z.className = 'look-zone ' + name;
     document.body.appendChild(z);
-    z.addEventListener('mouseenter', () => { look.peek = name === 'down' ? 30 : -30; aim(); });
+    z.addEventListener('mouseenter', () => { if (name === 'up' && camHover()) return; look.peek = name === 'down' ? 30 : -30; aim(); });   // (none over the ceiling camera, which sits in the top edge)
     z.addEventListener('mouseleave', () => { look.peek = 0; aim(); });
     z.addEventListener('click', () => { lookAt(stepFrom(look.rest, name === 'down' ? 1 : -1)); hint.classList.add('gone'); });
   }
@@ -3389,7 +3390,10 @@
     const st = C.create((Date.now() % 100000) + 1);
     let drawn = null, last = performance.now();
     const lit = new Map();                            // reason -> its timer (or true): lit while any reason stands
-    function showLamp() { lampEl.setAttribute('fill', lit.size ? C.TONE.lampOn : C.TONE.lampOff); }
+    let flash = false;                                // a blink (a click on it): the lamp the other way for a moment
+    function showLamp() { lampEl.setAttribute('fill', !!lit.size !== flash ? C.TONE.lampOn : C.TONE.lampOff); }
+    let flashT = 0;
+    function blink() { clearTimeout(flashT); flash = true; showLamp(); flashT = setTimeout(() => { flash = false; showLamp(); }, 260); }
     function lamp(reason, on, ms = 0) {
       clearTimeout(lit.get(reason));
       if (on) { if (!lit.has(reason)) playtest('camera: lamp on (' + reason + ')'); lit.set(reason, ms ? setTimeout(() => { lit.delete(reason); showLamp(); }, ms) : true); }
@@ -3446,7 +3450,80 @@
     }
     // (the refocus by hand, for ?dev and the audit: cam.refocus())
     const refocusNow = () => { if (!blind && !st.refocus) st.refocus = { t: 0 }; };
-    return { turn, lamp, shutter, saw, refocus: refocusNow, get blind() { return blind; }, set blind(v) { blind = !!v; }, get state() { return st; }, get lit() { return [...lit.keys()]; }, el: g, lampEl, SHUTTER };
+    // ---- clicking it (Arnold, 2026-10-11; design.md section 5, "As built: clicking the ceiling camera"). It follows the
+    // cursor, so it is already looking at you when you click it. Every click: the lamp blinks once and it freezes for a beat
+    // (camera.js freeze), and the company's log keeps "cam1: operator interaction". The first click of a night, Vigil types
+    // on the tube in its own lettering; the second, Vigil again; the third, Glenn, once a night; after that only the blink.
+    // Blind (night 2, the cable pulled: step 9's hook): Vigil says it is offline, once a night, and nothing else happens; no
+    // technician ever comes. Drafts, all of them. A click on it is only that: it never reaches the prompt, the look-up edge
+    // it sits in, Glenn's moments (acts) or anything under it.
+    const CLICK = [
+      () => term.announce([{ text: 'Vigil Systems: Camera 1 is here for your safety. Thank you for smiling!' }]),
+      () => term.announce([{ text: 'Vigil Systems: Your interest in Camera 1 has been noted.' }]),
+      () => glenn.say('Something wrong with the camera, chief?'),
+    ];
+    const OFFLINE = 'Vigil Systems: Camera 1 is offline. A technician has been notified.';
+    // words only when there is a tube to type them on (a click with the monitor off, at the login or in the dark doesn't
+    // use one up)
+    const canSay = () => room.power && shift && !shift.over && !account.loggingIn && !asleep;
+    function clicked() {
+      if (room.still) return;                         // (04:44: the room has stopped, and so has it; the click is only taken)
+      room.camClicks = (room.camClicks || 0) + 1;
+      playtest('camera: clicked (' + room.camClicks + ' tonight' + (blind ? ', blind' : '') + ')');
+      if (blind) {
+        if (room.camOffline || !canSay()) return;
+        room.camOffline = true;
+        term.announce([{ text: OFFLINE }]);
+        logLine('vigild[412]: ' + OFFLINE.replace(/^Vigil Systems: /, ''));
+        return;
+      }
+      blink(); C.freeze(st);
+      if (shift) logLine('cam1: operator interaction');
+      const n = room.camSaid || 0;
+      if (n < CLICK.length && canSay()) { room.camSaid = n + 1; CLICK[n](); }
+    }
+    // where it is on the screen: its base and its ball as drawn (the lens and the lamp are on them), wherever the look and the
+    // ceiling's parallax have put it
+    const hitParts = [g.querySelector('polygon'), g.querySelector('polygon[fill="' + C.TONE.ball + '"]')];
+    function onCam(x, y) {
+      for (const el of hitParts) {
+        const m = el.getScreenCTM(); if (!m) continue;
+        const p = new DOMPoint(x, y).matrixTransform(m.inverse());
+        if (el.isPointInFill(p)) return true;
+      }
+      return false;
+    }
+    // clickable only with nothing over it: the room itself is on top (or the look-up edge, which it sits in), no menu, no title,
+    // nothing held, not asleep or at the night's end
+    function clickable(e) {
+      if (e.button || window.vigilTime?.paused || document.body.classList.contains('title')) return false;
+      if (document.querySelector('#night-over:not([hidden])') || holding() || !onCam(e.clientX, e.clientY)) return false;
+      const top = document.elementFromPoint(e.clientX, e.clientY);
+      return !!top && (top.classList.contains('look-zone') || !!top.closest('#scene-holder'));
+    }
+    let pressed = false;
+    addEventListener('pointerdown', e => {
+      pressed = false;
+      if (!clickable(e)) return;
+      pressed = true;
+      e.preventDefault(); e.stopImmediatePropagation();
+      clicked();
+    }, true);
+    // the click that follows the press (the look-up edge goes on click) and any mouseup: swallowed with it
+    for (const ev of ['mouseup', 'click']) addEventListener(ev, e => { if (pressed) { e.preventDefault(); e.stopImmediatePropagation(); if (ev === 'click') pressed = false; } }, true);
+    // the hand over it: a pointer, not the look-up edge's arrow, and no lean. It sits in that edge, whose lean slides the
+    // view 30 px: over it is judged where it is with the view at rest, so the lean can't slide it out from under the hand
+    // and back (the click itself goes by where it is drawn)
+    let hover = false;
+    addEventListener('mousemove', e => {
+      const off = (look.y - look.rest) * scale * dolly;                  // (the lean's part of where the view is now)
+      const over = !e.buttons && clickable({ button: 0, clientX: e.clientX, clientY: e.clientY + off });
+      document.documentElement.classList.toggle('cam-hover', over);
+      if (over === hover) return;
+      hover = over;
+      if (e.target === zones.up) { look.peek = over ? 0 : -30; aim(); }
+    }, { passive: true });
+    return { turn, lamp, shutter, saw, refocus: refocusNow, blink, clicked, onCam, get hover() { return hover; }, get blind() { return blind; }, set blind(v) { blind = !!v; }, get state() { return st; }, get lit() { return [...lit.keys()]; }, el: g, lampEl, SHUTTER };
   })();
 
   // ------------------------------------------------------------ 04:44
@@ -4804,6 +4881,7 @@
     // the board starts from nothing every night (a lost night replays it as it was at 23:00)
     board = createBoard({ level: shift.level, you: initialsOf(account.name) || 'you' }); boardSeen.rank = 6; boardSeen.at = 0; boardT = 0;
     room.camSaw = false;                               // (the ceiling camera's line in the log and Glenn's: once a night)
+    room.camClicks = 0; room.camSaid = 0; room.camOffline = false;   // (clicking it: its words, once each a night)
     room.turned = false; room.cold = file.key !== 'none' || file.unlocked; room.coolUntil = 0; room.climaxed = false; room.tomorrowRow = null; room.dipped = false; room.faltered = 0;   // (the turn, 04:44's climax: once a night; Glenn's warmth, once the key is out, stays slipped: the story audit, 2026-10-06)
     // a night that starts mid-crisis (night 3): the LEDs already say so behind the login; the alerts come once you're in
     for (const e of shift.initial()) unitLed(e.unit, { DOWN: 'down', HOT: 'hot', STUCK: 'stuck', LOSS: 'loss', OOM: 'oom' }[e.kind]);

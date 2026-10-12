@@ -25,7 +25,9 @@
      it shrinks to FOCUS.k of its size, a beat, and comes back, eased as its turns are. Only smaller, never bigger than at
      rest (at rest the lens is already 6.11 px inside the ball's outline, at the 6 px rule's edge). Never on a steady beat:
      only at those moments (a steady pulse would read as loading; this reads as it looking). Not while it is blind (the
-     page passes `blind`: night 2's hook). st.focus is the lens's scale now (1 at rest). */
+     page passes `blind`: night 2's hook). st.focus is the lens's scale now (1 at rest).
+   - clicked (Arnold, 2026-10-11): it freezes where it is for FREEZE.ms (freeze(st)), a beat instead of following, its
+     patrol or a turn paused with it, then goes back to what it was doing from a standstill. */
 (function () {
   const CU = typeof window !== 'undefined' && window.ceilingUp ? window.ceilingUp : require('./ceilup.js');
   const H = 2198;                                       // mm: the ceiling above the eye
@@ -153,11 +155,12 @@
   const PATROL = { idle: 30000, speed: 8, pause: [2000, 3000], tilt: 1 / 3, pitch: 4 };
   const TURN = { speed: 10, hold: 3000 };
   const FOCUS = { k: .85, in: 380, hold: 260, out: 420 };   // (ms: shrinking, the beat, coming back)
+  const FREEZE = { ms: 1200 };                              // (a click on it: it stops dead for a beat)
   const ease = u => .5 - .5 * Math.cos(Math.PI * Math.max(0, Math.min(1, u)));
   // a glide from a to b: eased, its duration from the distance at a top speed (an eased glide's peak is pi/2 its mean)
   const glide = (a, b, speed) => ({ from: a.slice(), to: b.slice(), t: 0, ms: Math.max(400, Math.hypot(b[0] - a[0], b[1] - a[1]) / speed * 1000 * Math.PI / 2) });
   function create(seed = 1) {
-    return { ang: [0, 0], vel: [0, 0], speed: 0, mode: 'follow', want: [0, 0], move: null, held: 0, patrol: null, rnd: seed, focus: 1, refocus: null };
+    return { ang: [0, 0], vel: [0, 0], speed: 0, mode: 'follow', want: [0, 0], move: null, held: 0, patrol: null, rnd: seed, focus: 1, refocus: null, frozen: 0 };
   }
   // the lens's scale t ms into a refocus (1 when it is over)
   function focusAt(t) {
@@ -175,9 +178,12 @@
     const t = Array.isArray(to) && to.length === 2 ? clampAng(to) : turnTo(to);
     st.mode = 'turn'; st.move = glide(st.ang, t, TURN.speed); st.held = 0; st.patrol = null;
   }
+  // a click on it: it stops where it is for a beat (again from the start of the beat if clicked again meanwhile)
+  const freeze = st => { st.frozen = FREEZE.ms; st.vel = [0, 0]; };
   // input: { u, v (the cursor), idleMs (since the last input), seen (the camera can be seen: looking ahead) }
   function step(st, dt, input) {
     const before = st.ang.slice();
+    if (st.frozen > 0) { st.frozen = Math.max(0, st.frozen - dt); st.vel = [0, 0]; st.speed = 0; return st; }
     if (st.mode === 'turn') {
       const m = st.move;
       m.t = Math.min(m.ms, m.t + dt);
@@ -230,7 +236,7 @@
   }
 
   const api = { H, AT, M, S, SIZE, TONE, RANGE, TARGETS, STATIC, svg, STATIC_SVG, BALL_SVG, lampSvg, lensSvg, lensRing, lensAt, dirOf, turnTo, clampAng, cursorTurn,
-    FOLLOW, PATROL, TURN, FOCUS, focusAt, create, step, deliberate, outline, sample, fmt, pathOf };
+    FOLLOW, PATROL, TURN, FOCUS, FREEZE, focusAt, create, step, deliberate, freeze, outline, sample, fmt, pathOf };
   if (typeof window !== 'undefined') window.ceilingCamera = api;
   if (typeof module !== 'undefined') module.exports = api;
 })();

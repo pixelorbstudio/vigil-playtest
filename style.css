@@ -316,6 +316,7 @@ html.bars, html.bars body { background: var(--bars); }
 .look-zone { position: fixed; left: 0; right: 0; z-index: 2; }
 .look-zone.down { cursor: s-resize; }
 .look-zone.up { cursor: n-resize; }
+html.cam-hover, html.cam-hover * { cursor: pointer !important; }   /* the ceiling camera under the hand (app.js, clicking it) */
 
 /* a cartridge carried between the drawer and the slot, drawn over everything */
 #hand, #key-flight { position: absolute; left: 0; top: 0; width: 1440px; height: 2200px; overflow: visible; pointer-events: none; }
