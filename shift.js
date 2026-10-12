@@ -53,7 +53,8 @@
   // Energy (decided with Arnold 2026-09-29). At rest it drains by the body clock (easy at 23:00, heaviest around
   // 03:30, easing toward dawn), faster while you sit idle, and faster for every problem left open: broken racks are
   // stressful, which is a reason to fix them now. Work costs by effort and pays a little back when it lands, a
-  // cartridge win is a second wind, a loss knocks you down hard, and a game of Pong is a short break.
+  // cartridge win pays back what it cost to play (2026-10-12: no second wind), a loss knocks you down hard, and a game of
+  // Pong is a short break.
   const ENERGY = {
     start: 1,                                       // you arrive rested (Arnold, 2026-09-30; it was .9)
     perMin: 1 / 300,                                // the base: a full bar lasts five shift hours at a normal pace (tuned with shift-audit.js)
@@ -123,7 +124,10 @@
   const DIAL_FROM = 90;                             // DEFRAG's dial starts turning at 00:30
   // (play is spent while the game runs, over its minute, not at its start: the bar visibly ticks down faster while you
   // play; what is left of it when the game ends is spent then, so a game costs what it always did. Arnold, 2026-10-05)
-  const CART = { play: .05, win: .08, lose: .12 };   // playing a cartridge game; winning it (a second wind); losing it, on top
+  // a win pays back the play and no more (Arnold, 2026-10-12: it was .08, a second wind, and paidBack lifted you 8% above
+  // where the game began, so a player could hold 70% all night on wins without coffee): wins are energy-neutral, coffee is
+  // the only real refill
+  const CART = { play: .05, win: .05, lose: .12 };   // playing a cartridge game; winning it (the play back); losing it, on top
   // a unit whose game was just lost waits a real minute before its game can be played again (the simulation report,
   // 2026-10-06, item 4: the worst unit took 7 to 9 tries a night, each one another loss); its strike clock doesn't run
   // meanwhile, since the wait is the game's, not the player's
@@ -496,7 +500,7 @@
       return { hops: Math.max(5, Math.round(6 + 2 * u) + late - k * ROUTE_EASE.hops), dead: Math.max(0, Math.round(2 + 4 * u) + 2 * late - k * ROUTE_EASE.dead),
         tick: Math.min(170, Math.round(160 - 20 * u) - 5 * late + k * ROUTE_EASE.tick), eased: k };
     }
-    // a fix lands: a reboot or reroute pays a little back, a cartridge win (a stuck unit freed) is a second wind
+    // a fix lands: a reboot or reroute pays a little back, a cartridge win (a stuck unit freed) pays back its play
     // theirs: a fix someone else typed on your keys (aw's, night 2): the unit is back, and nothing of it is yours: no refund,
     // no streak, no pace, no mastery (2026-10-12, step 9; the story audit's fix 2: off your streak, as off your merit)
     function finish(unit, theirs = false) {
@@ -535,7 +539,9 @@
     // a cartridge game won pays for itself (Arnold, 2026-09-30: winning used to leave you worse off, since the game's
     // minute of drain was more than the win gave back): energy goes back to where it was when the game began, plus
     // the bonus, if that is more than it is now
-    function paidBack(e0, bonus) { s.energy = Math.min(1, Math.max(s.energy, e0 + bonus)); }
+    // a won game ends no lower than where it began, less the play and plus what the win pays back (CART.win): with the win
+    // the play back, exactly where it began (2026-10-12; it was e0 + the win, 8% above it)
+    function paidBack(e0, back) { s.energy = Math.min(1, Math.max(s.energy, e0 - CART.play + back)); }
     // a sip of coffee; a scoop of beans for the next pot
     function drink() { s.energy = Math.min(1, s.energy + ENERGY.sip); }
     function spend(x) { s.energy = Math.max(0, s.energy - x); }

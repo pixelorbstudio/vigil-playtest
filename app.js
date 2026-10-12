@@ -5,7 +5,7 @@
   // ---- ?playtest: what the tester did and when, kept across reloads (a lost night reloads the page), saved as a
   // text file from a button beside hum and sound. Commands typed, the log's own lines (alerts, fixes, Glenn,
   // compliance), looking down, the drawer, cartridges, sips, energy every 10%, game results, losses, the tab hidden.
-  // Nothing else about the game changes.
+  // Nothing else about the game changes, but where it ends: after shift 3 ("the playtest's end", 2026-10-12).
   const PLAYTEST = new URLSearchParams(location.search).has('playtest');
   const playtest = (() => {
     if (!PLAYTEST) return () => {};
@@ -22,6 +22,7 @@
     return note;
   })();
   if (PLAYTEST) document.addEventListener('visibilitychange', () => playtest(document.hidden ? 'tab hidden' : 'tab visible'));
+  if (window.vigilSaveReset) playtest(`a save from an older build: started fresh (${window.vigilSaveReset} keys cleared; index.html, the save's version)`);
   const stage = document.getElementById('stage');
   const holder = document.getElementById('scene-holder');
   const overlay = document.getElementById('overlay');
@@ -1964,8 +1965,8 @@
   // three hours): beans due while a canister waits unopened (in the receiver, or on its way) go into it as a second slip,
   // and opening it gives both. They still come down the tube: its rattle and thunk, nothing else to see.
   function waitingCan() {
-    if (dlv.incoming) return dlv.incoming;
-    if (dlv.can && !dlv.can.spent) return dlv.can;
+    if (dlv.incoming) return dlv.incoming.up ? null : dlv.incoming;   // (not the carrier come down for a ticket: it goes back up)
+    if (dlv.can && !dlv.can.spent && !dlv.can.up) return dlv.can;
     return null;
   }
   function joinCan(can, item) {
@@ -1985,14 +1986,30 @@
     await play(PO.flow.arrive(), { aw: !!item.aw }, {
       'tube-thunk': () => {
         dlv.incoming = null; dlv.can = item; item.landedAt = performance.now(); dlvSound('tube-thunk');
+        if (item.kind === 'ticket') reportBack(item.ticket);   // (Vigil's form line comes with it: the terminal, `report`)
         // the night's first delivery, Glenn says so, once (Arnold, 2026-10-03: in the playtest it passed unnoticed at the
         // terminal); after that, only the sound and the flag
-        if (!room.dlvSaid && !item.aw && !item.storyCan && !room.linkDown && !seen.has('tube')) { room.dlvSaid = true; seen.mark('tube'); glenn.sayIf(() => dlv.can === item, 'Something came down the tube for you, chief. Left of the desk.'); }   // (not aw's, in the blackout: the link is down)
+        if (!room.dlvSaid && !item.aw && !item.storyCan && !item.up && !room.linkDown && !seen.has('tube')) { room.dlvSaid = true; seen.mark('tube'); glenn.sayIf(() => dlv.can === item, 'Something came down the tube for you, chief. Left of the desk.'); }   // (not aw's, in the blackout: the link is down)
       },
     });
     dlv.canH = 0; drawDlv();
+    if (item.up) return dlvTicketUp(item);
     await wait(200);
     dlv.busy = false;
+  }
+  // ---- a ticket up the tube (`report <unit>`; Arnold, 2026-10-12): the carrier comes down empty, a beat in the receiver while
+  // it takes the paper, and goes back up by itself (the only thing besides the offer you ever send up). About a minute later
+  // it comes down again with your ticket stamped DUPLICATE and the old ones for the same unit clipped to it, a canister that
+  // nobody sent (storyCan: it logs nothing, pays nothing, takes no beans), read as the slips are. Night 3: it never comes
+  // back. The command decides all that (report, in the terminal): here, item.up is the ticket, and up.back what comes back.
+  async function dlvTicketUp(item) {
+    await wait(1100);
+    await play({ ms: 520, events: [[0, 'tube-up']], at: t => ({ canH: PO.flow.DROP * Math.min(1, t / 420) ** 2, flag: Math.max(0, 1 - t / 220) }) }, {});
+    dlv.can = null; dlv.canH = 0; dlv.flag = 0; drawDlv(); dlv.busy = false;
+    playtest(`report: the ticket for ${item.up.unit} went up the tube`);
+    const back = item.up.back, sh = shift;
+    if (back) setTimeout(() => { if (shift === sh && !shift.over) dlvArrive({ why: 'report', kind: 'ticket', storyCan: true, ticket: back }); }, 60000);
+    dlvNext();
   }
   // ---- a story canister (night 1's at 04:44; the proposal, section 1): it never queues and never joins. One waiting in the
   // receiver goes back up first (seen: it rises and is gone) and comes down again later, unopened, as the next delivery.
@@ -2090,6 +2107,8 @@
       if (m.story === 'timesheet') papers.push({ kind: 'timesheet', opts: {}, clipped: true, pair });
     };
     if (it.kind === 'loginnote') return [{ kind: 'loginnote', opts: {} }];
+    // a ticket come back down: yours in front, DUPLICATE, the old operators' behind it, clipped (`report`, ticketPapers)
+    if (it.kind === 'ticket') return ticketPapers(it.ticket);
     add(it, 412, 0); (it.more || []).forEach((m, j) => add(m, 413 + j, j + 1));
     return papers;
   }
@@ -2177,7 +2196,9 @@
   }
   window.__dlv = { afterLogin: dlvAfterLogin, arrive: dlvArrive, story: dlvStory, clear: dlvClearForStory, reset: dlvReset, state: dlv, click: dlvStationClick, putAway: dlvPutAway, tick: flagTick,   // (click, putAway: for trying it from the console)
     // night 3: the canister in the blackout, with the supervisor link down, for aw (the blackout calls this once it is built)
-    aw: () => dlvArrive({ why: 'aw', kind: 'note', aw: true }) };
+    aw: () => dlvArrive({ why: 'aw', kind: 'note', aw: true }),
+    // `report <unit>`: the empty carrier down for the ticket (t: the ticket; t.back, what comes back, or nothing on night 3)
+    ticket: t => dlvArrive({ why: 'report', kind: 'empty', up: t }) };
   drawDlv();
 
   // ---- the login note at 04:44 (design.md section 5, "Surface and focus, decided", 11; Arnold, 2026-10-10: it replaces
@@ -2668,9 +2689,20 @@
   // camera's 0.07, which left a sliver). In the desk's own layer, so it is under the mug and the keyboard and
   // moves with the desk. Clicked, it comes up to you and is read like the other papers; a click, q or Backspace puts it
   // back. Glenn says nothing. It teaches looking down, and makes you curious about the ceiling. Draft words.
+  // (2026-10-12, Arnold: on the desk it read too narrow, a sliver. The desk there is seen almost edge-on, so a card lying
+  // across it stays a sliver whatever its size; it reads as a card with its long side running away from you. Now a 6 x 3.5
+  // in card, 152 x 89 mm, its long side away and turned 20°, its print running away from you, placed through a model of the
+  // drawing's desk plane (rays from the vanishing centre, the room's barrel curve, the depth fitted to the drawn mug's foot;
+  // audit-desknote*.js, out of git): 305 x 32 px on screen, 120 px of it at 4:3, clear of the mug and the keyboard by 8 px or
+  // more. Its two short edges, which run across the desk, bow with the room by 0.6 px: drawn as quadratics (bow, their
+  // control points, within 0.03 px of the true edges). Held, 460 x 268, the card's own 6 : 3.5. Arnold chose it as the most
+  // natural of three, stills-out/desknote-V2-*.)
   const NOTE = {
-    desk: [[1362, 926], [1585, 919], [1597, 938], [1371, 946]],   // back left, back right, front right, front left (stage)
-    w: 460, h: 276, at: [720, 470], rot: -2 * Math.PI / 180, ms: 460,
+    // its corners on the desk in the print's order (top left, top right, bottom right, bottom left), stage coordinates
+    desk: [[1545.97, 947.63], [1318.93, 936.70], [1432.00, 915.97], [1623.57, 923.09]],
+    // the control points of the edges that bow, by the corner they start from (edge 1: corners 1 to 2; 3: corners 3 to 0)
+    bow: { 1: [1375.71, 927.42], 3: [1585.12, 936.48] },
+    w: 460, h: 268, at: [720, 470], rot: -2 * Math.PI / 180, ms: 460,
     lines: ['Supplies: desk drawers, below.', 'Ceiling tiles: maintenance only.'],
   };
   const deskNote = { held: false, busy: false };
@@ -2691,9 +2723,19 @@
   }
   // the card through a quad: its paper, and its print by the affine of three corners (from a quad that flat, the print
   // is left out: on the desk its writing is a single rule, a hint, its letters under a pixel)
-  function noteSvg(q, print) {
+  // (bend: how much of the desk's bow its edges keep, 1 lying on the desk, 0 held up; between, as it lifts)
+  function noteSvg(q, print, bend = 0) {
     const [a, b, , d] = q, { w, h } = NOTE;
-    let svg = `<polygon points="${pt2(q)}" fill="#FAFAF9" ${INK1}/>`;
+    let path = `M${pt2([q[0]])}`;
+    for (let i = 0; i < 4; i++) {
+      const p = q[i], n = q[(i + 1) % 4], c = NOTE.bow[i];
+      if (c && bend > 0) {
+        // the control point as it is on the desk, carried with the card: its offset from its edge's chord's middle
+        const D = NOTE.desk, m0 = [(D[i][0] + D[(i + 1) % 4][0]) / 2, (D[i][1] + D[(i + 1) % 4][1]) / 2];
+        path += `Q${pt2([[(p[0] + n[0]) / 2 + (c[0] - m0[0]) * bend, (p[1] + n[1]) / 2 + (c[1] - m0[1]) * bend]])} ${pt2([n])}`;
+      } else path += `L${pt2([n])}`;
+    }
+    let svg = `<path d="${path.replace(/,/g, ' ')}Z" fill="#FAFAF9" ${INK1}/>`;
     if (!print) {
       const at = (u, v) => [a[0] + (b[0] - a[0]) * u + (d[0] - a[0]) * v, a[1] + (b[1] - a[1]) * u + (d[1] - a[1]) * v];
       return svg + `<path d="M${pt2([at(.1, .36)])}L${pt2([at(.62, .36)])}" stroke="#D2D2D0" stroke-width="1" stroke-linecap="round"/>`;
@@ -2710,8 +2752,8 @@
   // the hit on the desk: the card, and a few pixels round it (it is thin from the chair)
   function drawDeskNote() {
     const q = NOTE.desk, cx = q.reduce((s, p) => s + p[0], 0) / 4, cy = q.reduce((s, p) => s + p[1], 0) / 4;
-    const grown = q.map(([x, y]) => [cx + (x - cx) * 1.08, cy + (y - cy) * 1.9]);
-    noteDeskG.innerHTML = deskNote.held || deskNote.busy ? '' : noteSvg(q, false) + `<polygon points="${pt2(grown)}" fill="transparent"/>`;
+    const grown = q.map(([x, y]) => [cx + (x - cx) * 1.1, cy + (y - cy) * 1.2]);
+    noteDeskG.innerHTML = deskNote.held || deskNote.busy ? '' : noteSvg(q, false, 1) + `<polygon points="${pt2(grown)}" fill="transparent"/>`;
   }
   drawDeskNote();
   const lerpQ = (A, B, u) => A.map((p, i) => [p[0] + (B[i][0] - p[0]) * u, p[1] + (B[i][1] - p[1]) * u]);
@@ -2719,14 +2761,14 @@
     if (deskNote.busy || deskNote.held || handsFull() || holding()) return;
     deskNote.busy = true; drawDeskNote(); playtest('desk note: picked up');
     const to = noteHeldQuad();
-    await motion(NOTE.ms, u => { const k = easeIO(u); noteLayer.innerHTML = noteSvg(lerpQ(NOTE.desk, to, k), k > .35); });
+    await motion(NOTE.ms, u => { const k = easeIO(u); noteLayer.innerHTML = noteSvg(lerpQ(NOTE.desk, to, k), k > .35, 1 - k); });
     deskNote.busy = false; deskNote.held = true; noteCatcher.style.display = '';
   }
   async function putNoteBack() {
     if (deskNote.busy || !deskNote.held) return;
     deskNote.busy = true; deskNote.held = false; noteCatcher.style.display = 'none'; playtest('desk note: put back');
     const from = noteHeldQuad();
-    await motion(NOTE.ms, u => { const k = easeIO(u); noteLayer.innerHTML = noteSvg(lerpQ(from, NOTE.desk, k), k < .65); });
+    await motion(NOTE.ms, u => { const k = easeIO(u); noteLayer.innerHTML = noteSvg(lerpQ(from, NOTE.desk, k), k < .65, k); });
     noteLayer.innerHTML = ''; deskNote.busy = false; drawDeskNote();
   }
   noteDeskG.addEventListener('pointerdown', e => { e.preventDefault(); hint.classList.add('gone'); liftNote(); });
@@ -3887,7 +3929,7 @@
   });
   addEventListener('keyup', e => { const id = CODE_TO_ID[codeOf(e)]; if (id) release(id); });
   function typeKey(k) {
-    if (asleep) return;
+    if (asleep || ended) return;
     const lag = Math.max(shift.energy < .25 ? (.25 - shift.energy) / .25 * 180 : 0, drowsy * 240);   // (and as the eyes go, the first sleep)
     lag ? setTimeout(() => term.input(k), lag) : term.input(k);
   }
@@ -3931,7 +3973,7 @@
       const letter = id.slice(4);
       const k = ID_TO_KEY[id] ?? (letter.length === 1 ? letter.toLowerCase() : null);
       if (k === 'Escape') { setTimeout(() => tubeMenu?.open('the drawn esc'), 120); return; }   // the drawn esc, as the real one: the menu
-      if (k !== null) term.input(k);
+      if (k !== null && !ended) term.input(k);
       hint.classList.add('gone');
     });
   }
@@ -4380,7 +4422,7 @@
     function forget() { Object.assign(lesson, { on: false, early: 0, firstDone: false, dropped: false, busy: false, scripted: false, saidKnew: false }); lesson.knew.clear(); taught.clear(); kept.clear(); orders.clear(); pending.clear(); asked = null; room.coolUntil = 0; arrived = false; clearTimeout(drawerTimer); clearTimeout(arrivalTimer); try { localStorage.removeItem('vigil.glenn'); } catch (e) {} }
     // clocked out and back in: he arrives again ("Back already.")
     function newNight() { arrived = false; lesson.on = false; lesson.busy = false; }
-    return { say, sayIf, onceIf, moment, urgent, leave, once, falter, arrive, arriveIn, forget, newNight, order, complied, broke, refused, closeOrders, did, basicsDone, checkBasics, answer, heard, voice, tried, lessonTick, lesson, taught: k => taught.has(k) };
+    return { say, sayIf, onceIf, moment, urgent, leave, once, falter, arrive, arriveIn, forget, newNight, order, complied, broke, refused, closeOrders, stands: what => orders.has(what), did, basicsDone, checkBasics, answer, heard, voice, tried, lessonTick, lesson, taught: k => taught.has(k) };
   })();
 
   // ------------------------------------------------------------ mail
@@ -4403,10 +4445,15 @@
       { t: 120, from: 'Facilities', addr: 'facilities@site4.vigil', subject: 'Lift out of service', body: () => [
         'The lift on level 2 is out of service until further notice. Please use the stairs.',
         '', 'We apologise for any inconvenience.', '', { text: 'Facilities, Site 4', cls: 'dim' }] },
-      { t: 210, from: 'Vigil Weekly', addr: 'news@vigil', subject: 'Operator of the month', body: () => [
-        "This month's operator of the month is M., Site 4, nights.",
-        '', '11,408 consecutive shifts, and not one missed. Congratulations, M.!',
-        '', { text: 'Vigil Weekly. Someone is always awake.', cls: 'dim' }] },
+      // the operator of the month is you (Arnold, 2026-10-12): it named M., which read as if M. still worked here; now the
+      // player, with an impossible count that climbs a little each night (a company record: one more for every shift
+      // clocked in, a lost night's too, from what the game already keeps). m's own 2019 mail about M. matches it (draft words)
+      { t: 210, from: 'Vigil Weekly', addr: 'news@vigil', subject: 'Operator of the month', body: () => {
+        const who = account.name || account.user, n = (1203 + Math.max(0, (shift?.no || 1) - 1) + lostNights).toLocaleString('en-US');
+        return [`This month's operator of the month is ${who}, Site 4, nights.`,
+          '', `${n} consecutive shifts, and not one missed. Congratulations, ${who}!`,
+          '', { text: 'Vigil Weekly. Someone is always awake.', cls: 'dim' }];
+      } },
       { t: 375, from: 'day shift', addr: 'dayshift@site4.vigil', subject: 'running late', body: () => [
         'running a bit late. hold the fort.', '', { text: '- day shift', cls: 'dim' }] },
     ];
@@ -4785,6 +4832,71 @@
     const sh = shift;
     setTimeout(() => { if (shift === sh && !shift.over) glenn.sayIf(() => !shift.over, 'Sorry, chief. Long night up here too.'); }, 60000);
   }
+  // ---- report <unit> (design.md section 5, "`report <unit>`, redecided"; Arnold, 2026-10-12; rough, under the freeze). It
+  // files a ticket upstairs and fixes nothing: the unit stays broken, its strike clock runs, it still has to be fixed, so
+  // there is nothing to farm. The first report of a unit in a night goes up the tube (the carrier comes down empty, takes
+  // it, goes back up: the deliveries' dlvTicketUp) and about a minute later comes back down, your ticket stamped DUPLICATE
+  // with the old operators' tickets for the same unit clipped to it, all open (ticketPapers), and Vigil's form line with it.
+  // Another report of that unit that night gets the line alone. Night 2: Glenn objects to the first (an order), and every
+  // report after it, once he has said it, is refused (glenn.refused: the record writes it as night 2 writes refusals).
+  // Night 3: it goes up and never comes back, and nothing answers. Every word is a draft.
+  const REPORT_ORDER = 'Be a pal and leave the paperwork to upstairs, chief.';
+  const REPORT_LINE = 'Vigil Systems: Ticket received. Service continues as normal.';
+  const FAULT = { DOWN: 'not responding', HOT: 'running hot', STUCK: 'jobs piling up', LOSS: 'dropping packets', OOM: 'out of memory', INTRUSION: 'probed' };
+  const reports = { sh: null, units: new Set(), objected: false };
+  // the old operators' tickets for the unit, newest first, each in their own manner (M.'s lowercase and short, signed as
+  // .plan is; aw's with a line in her own round hand, as her letter and her scrawl on the issue slip; rd's the runbook's
+  // words, typed, as the company's letter to him is), dated in their own years (finger's last logins: rd Oct 2017, aw
+  // Jun 2018, m Apr 2019); M.'s for L20 the night ~/.history has it
+  const OLD_TICKETS = [
+    (u, f, h) => ({ by: 'm', no: 2900 + h, date: u === 'L20' ? '2019-03-31' : `2019-03-${String(1 + h % 27).padStart(2, '0')}`, words: ['again.', 'i keep sending it up.  — m'] }),
+    (u, f, h) => ({ by: 'aw', no: 2300 + h, date: `2018-0${1 + h % 5}-${String(2 + h % 26).padStart(2, '0')}`, words: [`${u} ${f} again tonight.`], hand: { text: 'is anyone up there?', font: "'Indie Flower', cursive" } }),
+    (u, f, h) => ({ by: 'rd', no: 1700 + h, date: `2017-0${3 + h % 6}-${String(1 + (h * 7) % 28).padStart(2, '0')}`, words: ['Fixed per runbook. Fault returned within', 'the hour. Requesting inspection.'] }),
+  ];
+  function ticketPapers(t) {
+    const h = [...t.unit].reduce((a, c) => a * 31 + c.charCodeAt(0), 7) % 97;
+    return [{ kind: 'ticket', opts: { unit: t.unit, fault: t.fault, no: t.no, date: t.date, by: t.by, words: [`filed from tty1, ${t.at}.`], dup: true }, pair: 0 },
+      ...OLD_TICKETS.map(o => ({ kind: 'ticket', opts: { unit: t.unit, fault: t.fault, ...o(t.unit, t.fault, h) }, clipped: true, pair: 0 }))];
+  }
+  function reportLine() {
+    if (!shift || shift.over) return;
+    playtest('vigil: ' + REPORT_LINE); logLine('vigild[412]: ' + REPORT_LINE.replace(/^Vigil Systems: /, ''));
+    term.announce([{ text: REPORT_LINE, cls: 'vigil' }]);
+  }
+  function reportBack() { if (shift.level < 3) reportLine(); }
+  function fileReport(name) {
+    if (!name) return ['report what?   report <unit> files a ticket upstairs.'];
+    const u = name.toUpperCase(), r = name.toLowerCase().replace(/^(left|right)$/, 'rack-$1'), rack = /^rack-(left|right)$/.test(r);
+    if (!rack && !UNITS[u]) return [`report: ${name}: no such unit   units: ${Object.keys(UNITS).join(' ')}`];
+    const unit = rack ? r : u, open = shift.open();
+    // (a unit on a rack dropping packets reports the rack's trouble, as top shows it)
+    const o = open.find(x => x.unit === unit) || (!rack && open.find(x => x.kind === 'LOSS' && x.unit === 'rack-' + UNITS[u].side));
+    if (!o) return [`${unit} is fine. nothing to report.`];
+    if (reports.sh !== shift) Object.assign(reports, { sh: shift, units: new Set(), objected: false });
+    const first = !reports.units.has(unit), sh = shift, fault = FAULT[o.kind];
+    reports.units.add(unit);
+    let no = 4400; try { no += +localStorage.getItem('vigil.tickets') || 0; localStorage.setItem('vigil.tickets', String(no - 4399)); } catch (e) {}
+    playtest(`report ${unit} (${o.kind}): ticket ${no}${first ? ', up the tube' : ', again tonight'}`);
+    logLine(`vigild[1]: ticket ${no} filed: ${unit}, ${fault}`);
+    if (shift.level === 2 && !room.linkDown) {
+      if (!reports.objected) { reports.objected = true; glenn.urgent(REPORT_ORDER); glenn.order('report', REPORT_ORDER); }
+      else if (glenn.stands('report')) { glenn.refused('report', REPORT_ORDER); glenn.order('report', REPORT_ORDER); }   // (only once he has said it: a thing done before he has isn't refusing him)
+    }
+    if (first) {
+      const d = new Date(), p = n => String(n).padStart(2, '0');
+      const t = { unit, fault, no, by: account.user, date: `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`, at: shift.clock().slice(0, 5) };
+      window.__dlv.ticket({ unit, back: shift.level >= 3 ? null : t });
+      return [`ticket ${no} filed: ${unit}, ${fault}.`, { text: '(it goes up the tube.)', cls: 'dim' }];
+    }
+    if (shift.level < 3) setTimeout(() => { if (shift === sh) reportLine(); }, 1400);
+    return [`ticket ${no} filed: ${unit}, ${fault}.`];
+  }
+  // (Tab after "report ": the oldest trouble not reported tonight)
+  function reportTab() {
+    const done = reports.sh === shift ? reports.units : new Set();
+    return shift.open().find(o => !o.fixing && !done.has(o.unit))?.unit || null;
+  }
+
   // ---- the quiet's ominous moments (design.md section 5, "Playtest round 4: decided", 3; 2026-10-11, step 4 part B; rough
   // art, listed placeholders). A fly crossing the room in the drawing's parallax, silent (Arnold, 2026-10-11: its buzz,
   // made in code, is gone, as the camera's whir went; if a fly is heard again, it is a recording); a unit's LED blinking out of its pattern for a few seconds; a shape passing behind rack-right's glass. Each happens
@@ -4921,7 +5033,7 @@
     if (!UNITS[u]) { rackLed(u, look === 'loss'); return; }
     for (const l of UNITS[u].leds) for (const c of ['down', 'hot', 'rebooting', 'stuck', 'oom', 'probed', 'flash']) ledClass(l, c, c === look);
   }
-  let shift = null, shiftT = 0, asleep = false, ghostAt = Infinity, ghostDone = false, woke = false;
+  let shift = null, shiftT = 0, asleep = false, ended = false, ghostAt = Infinity, ghostDone = false, woke = false;
   // ---- the second login (design.md, night 1's off-notes; Arnold, 2026-10-02). Once a night, about 01:30, a session
   // opens on tty2 with no name on it, and the live log says so, quietly. For about a real minute someone types somewhere
   // else in the building, far off, on a switch none of the other voices has; then it closes, and the log says that too.
@@ -5237,6 +5349,10 @@
       kept = sv ? Math.min(4, Math.max(1, sv)) : nv ? [1, 3, 4][Math.min(3, Math.max(1, nv)) - 1] : 1;
     } catch (e) {}
     const shiftAsked = +q.get('shift') || (+q.get('level') ? [1, 3, 4][Math.min(3, Math.max(1, +q.get('level'))) - 1] : 0);
+    // the playtest build ends where the game is built (2026-10-12): a save at shift 4 (night 3, not built) opens on the end
+    // card (below, "the playtest's end"), over the room as shift 3 left it; ?shift= still plays any shift, and without
+    // ?playtest night 3 is reached as before
+    if (PLAYTEST && !shiftAsked && kept === 4) { kept = 3; ended = true; }
     // what the night before left you with (vigil.carry, saved at its 05:30; Arnold, 2026-10-06): the beans as they were, and
     // the energy, but never under 60%; for the repeat also the pace, the trouble met and the cartridges handed over. None on
     // a first night (or a fresh start, or a new name).
@@ -5667,6 +5783,16 @@
     eyes.shut(); playtest('the blink');
     clockHeld = true;                                  // (the clock readout keeps its last minute in the dark)
     account.loggingIn = true;                          // the clock waits for the login
+    // the playtest build ends here, after shift 3 (night 2, rough): the eyes open on the room, and where the next night would
+    // boot, the tube comes on by itself to the end card, and nothing after it
+    if (PLAYTEST && shift.no === 3) {
+      eyes.cover(false); term.clear();
+      await wait(800); await eyes.open(); await wait(600);
+      if (gone()) return;
+      playtestEnd();
+      await turnItself(true);
+      return;
+    }
     asleep = false;
     startShift(); updateVitals(); glenn.newNight();
     eyes.cover(false);                               // (shut: the lids hold the dark again, the screen can go)
@@ -5680,6 +5806,16 @@
     clockHeld = false; drawClock(true);                // 23:00, with the screen
     await term.boot(['Last shift ended ....... 05:30, 0 minutes ago'], firstAlert);
     clockedIn();
+  }
+  // ---- the playtest's end (?playtest only; 2026-10-12): the game ends where it is built. After shift 3 clocks out (above,
+  // clockOut), or on a load whose save is at shift 4, the tube shows a quiet card in the start's lettering, sized so its lines
+  // are the tube's own text size, with how to save the log under it; the keys type nothing more, and Esc still opens the menu
+  // (its "save playtest log")
+  const END_CARD = { card: ["that's as far as the night goes for now.", 'thank you for playing.'], hint: 'esc to save your log', unit: 30 / 19 };
+  function playtestEnd() {
+    ended = true;
+    playtest('the end card: the playtest ends after shift 3');
+    term.title(END_CARD);
   }
   // Night 3 starts mid-crisis, and the room is failing before you have sat down: its first alert always prints
   // between the login and the welcome (nights 1 and 2: the welcome and the mail first, always). The rest after.
@@ -5996,7 +6132,7 @@
       if (titleView) {
         const box = menuBox ? menuBox.map(runsOf) : null;
         crt.paint({ rows: [], cursor: null, title: box ? { ...titleView, box } : titleView });
-        setOut(box ? box.map(r => r.map(x => x.text).join('')).join('\n') : [titleView.name, ...(titleView.lead || []).map(l => l.text), titleView.items.map((it, i) => i === titleView.sel ? `[${it}]` : it).join('   '), titleView.hint || ''].join('\n'));
+        setOut(box ? box.map(r => r.map(x => x.text).join('')).join('\n') : titleView.card ? [...titleView.card, titleView.hint || ''].join('\n') : [titleView.name, ...(titleView.lead || []).map(l => l.text), titleView.items.map((it, i) => i === titleView.sel ? `[${it}]` : it).join('   '), titleView.hint || ''].join('\n'));
         return;
       }
       let rows, cursor = null, n = paneN(), L = crt.layout(n);
@@ -6305,7 +6441,7 @@
     // one line (Arnold, 2026-10-04): batch fixing is never advertised; it sits here among old commands from 2019.
     FS['.history'] = [
       '2019-03-29 23:02  status', '2019-03-29 23:41  reboot L20', '2019-03-30 01:17  status', '2019-03-30 01:18  cat runbook',
-      '2019-03-31 02:52  reboot L20 L47 L33', '2019-03-31 02:53  status', '2019-03-31 03:20  reroute R17', '2019-04-01 23:06  top',
+      '2019-03-31 02:52  reboot L20 L47 L33', '2019-03-31 02:53  status', '2019-03-31 02:58  report L20', '2019-03-31 03:20  reroute R17', '2019-04-01 23:06  top',
       '2019-04-01 23:07  status'];
     const isDir = n => n && typeof n === 'object' && !Array.isArray(n);
     const readFile = n => Array.isArray(n) ? n : typeof n === 'function' ? n() : null;
@@ -6401,6 +6537,7 @@
       },
       reboot: args => args.length > 1 ? fixMany('reboot', args) : fixUnit('reboot', args[0]),
       reroute: args => args.length > 1 ? fixMany('reroute', args) : fixUnit('reroute', args[0]),
+      report: args => fileReport(args[0]),
       shift: () => [shift.over ? `it is ${shift.clock()}. the shift ended at 05:30. the day shift is not here yet.` : `the shift runs until 05:30. it is ${shift.clock()}.`],
       coffee: () => [(room.coffee > 0 ? `coffee: ${coffeeWord()}, ${Math.round(room.coffee * 100)}% left. click the mug.` : shift.beans > 0 ? 'coffee: none. try brew.' : 'coffee: none.') + ` ${shift.beans} bean${shift.beans === 1 ? '' : 's'} left.`],
       brew: () => {
@@ -6674,7 +6811,7 @@
     const ALIASES = {
       dir: 'ls', list: 'ls', ll: 'ls', look: 'ls', 'cd..': ['cd', '..'], cls: 'clear',
       man: 'help', '?': 'help', commands: 'help', info: 'help', manual: 'help', h: 'help', guide: 'help', tutorial: 'help',
-      check: 'status', stat: 'status', state: 'status', report: 'status', units: 'status', racks: 'status', alerts: 'status', problems: 'status',
+      check: 'status', stat: 'status', state: 'status', units: 'status', racks: 'status', alerts: 'status', problems: 'status',
       ps: 'top', htop: 'top', monitor: 'top',
       more: 'cat', less: 'cat', type: 'cat', open: 'cat', view: 'cat', read: args => args.length ? ['cat', ...args] : ['mail'],
       email: 'mail', inbox: 'mail', messages: 'mail', mails: 'mail',
@@ -8231,9 +8368,10 @@
         const fill = tabUnits(verb, parts.slice(1, -1).map(p => p.toUpperCase()));
         if (fill) { line = [...parts.slice(0, -1), ...fill].join(' ') + ' '; playtest(`tab: ${line.trim()}`); return; }
       }
+      if (parts.length === 2 && last === '' && verb === 'report') { const u = reportTab(); if (u) { line = 'report ' + u + ' '; playtest(`tab: ${line.trim()}`); return; } }
       if (parts.length === 1) cands = Object.keys(COMMANDS).filter(c => c.startsWith(last) && (c !== 'defrag' || room.cart === 'DEFRAG') && (c !== 'route' || room.cart === 'ROUTE') && (c !== 'heap' || room.cart === 'HEAP') && (c !== 'firewall' || room.cart === 'FIREWALL'));
       else if (parts.length === 2 && parts[0] === 'route') cands = ['rack-left', 'rack-right'].filter(n => n.startsWith(last.toLowerCase()));
-      else if ((parts.length === 2 && ['ping', 'defrag', 'heap', 'firewall'].includes(parts[0])) || (parts.length >= 2 && ['reboot', 'reroute'].includes(parts[0]))) {
+      else if ((parts.length === 2 && ['ping', 'defrag', 'heap', 'firewall', 'report'].includes(parts[0])) || (parts.length >= 2 && ['reboot', 'reroute'].includes(parts[0]))) {
         const names = [...new Set([...shift.open().map(o => o.unit), ...Object.keys(UNITS)])];
         cands = names.filter(n => n.startsWith(last.toUpperCase()));
       } else {
@@ -8601,7 +8739,7 @@
     // keeps the room's memory.)
     function freshStart() {
       playtest('start over: a fresh start');
-      try { for (const k of Object.keys(localStorage)) if (k.startsWith('vigil.') && !['vigil.volume', 'vigil.hum', 'vigil.playtest'].includes(k)) localStorage.removeItem(k); } catch (e) {}
+      try { for (const k of Object.keys(localStorage)) if (k.startsWith('vigil.') && !['vigil.volume', 'vigil.hum', 'vigil.playtest', 'vigil.save'].includes(k)) localStorage.removeItem(k); } catch (e) {}
       try { localStorage.setItem('vigil.begin', 'new'); } catch (e) {}   // (the title's new shift: the room drawn in, no title)
       location.reload();
     }
@@ -8965,7 +9103,7 @@
       else if (it === 'no, go back') { page = 'main'; sel = items().indexOf('new shift'); draw(); }
       else if (it === 'yes, new shift') {
         // the menu's fresh start: every vigil.* but the settings and a playtester's log, then straight into the pull-back
-        try { for (const k of Object.keys(localStorage)) if (k.startsWith('vigil.') && !['vigil.volume', 'vigil.hum', 'vigil.playtest'].includes(k)) localStorage.removeItem(k); } catch (e) {}
+        try { for (const k of Object.keys(localStorage)) if (k.startsWith('vigil.') && !['vigil.volume', 'vigil.hum', 'vigil.playtest', 'vigil.save'].includes(k)) localStorage.removeItem(k); } catch (e) {}
         try { localStorage.setItem('vigil.begin', 'new'); } catch (e) {}
         location.reload();
       }
@@ -9081,6 +9219,9 @@
     }
     await wait(500);
   }
-  await term.boot([], firstAlert);
-  clockedIn();
+  if (ended) playtestEnd();                         // (a playtest's save past shift 3: the end card, no boot)
+  else {
+    await term.boot([], firstAlert);
+    clockedIn();
+  }
 })();

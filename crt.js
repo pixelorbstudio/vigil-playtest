@@ -479,6 +479,17 @@
         });
         f.restore(); return hits;
       }
+      // or t.card: the playtest's end card (2026-10-12), its lines at that screen's 30 px, centred, and t.hint under them,
+      // dim at 22; nothing to choose
+      if (t.card) {
+        const fs = px(30), lh = fs * 1.5, gap = px(18), n = t.card.length;
+        let y = H / 2 - (n * lh + (t.hint ? gap + px(22) * 1.5 : 0)) / 2 + lh / 2;
+        f.textAlign = 'center'; f.fillStyle = INK; f.shadowColor = GLOW; f.shadowBlur = px(10) * K;
+        f.font = `${fs}px ${FAMILY}`;
+        for (const l of t.card) { f.fillText(l, cx, y); y += lh; }
+        if (t.hint) { f.font = `${px(22)}px ${FAMILY}`; f.globalAlpha = .55; f.shadowBlur = 0; f.fillText(t.hint, cx, y - lh / 2 + gap + px(22) * .75); f.globalAlpha = 1; }
+        f.restore(); return hits;
+      }
       const fs = px(30), gap = px(18), lead = t.lead || [];
       let y = H / 2 - px(60) - lead.length * fs * .75;
       f.textAlign = 'center'; f.fillStyle = INK; f.shadowColor = GLOW; f.shadowBlur = px(10) * K;

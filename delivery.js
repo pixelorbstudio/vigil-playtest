@@ -306,7 +306,7 @@
   const CARBON = ['REQUEST: 1 BAG · REASON: can\'t stay awake', 'TO: m · 2019-04-01'];
   // (scrawl: a few words written on it by hand, beside the typing: aw's "for 4." on her canister's issue slip, night 2, in her
   // own round hand, Indie Flower, as on her letter; 2026-10-12, step 9)
-  function slip(kind, { note = [], to = '', aw = false, no = 412, struck = false, carbon = false, date = '', scrawl = '' } = {}, place = { cx: 720, cy: 470, k: 1 }) {
+  function slip(kind, { note = [], to = '', aw = false, no = 412, struck = false, carbon = false, date = '', scrawl = '', unit = '', fault = '', by = '', words = [], hand = null, dup = false } = {}, place = { cx: 720, cy: 470, k: 1 }) {
     const { w, h } = SLIP, a = (place.rot ?? SLIP.rot) * Math.PI / 180, c = Math.cos(a) * place.k, si = Math.sin(a) * place.k;
     const P2 = (x, y) => [place.cx + (x - w / 2) * c - (y - h / 2) * si, place.cy + (x - w / 2) * si + (y - h / 2) * c];
     const m = [c, si, -si, c, ...P2(0, 0)].map(v => v.toFixed(4)).join(' ');
@@ -341,6 +341,24 @@
       inner += text(w / 2, 212, date, `font-size="14" letter-spacing="1" fill="${GREY}" text-anchor="middle"`);
       inner += rule(236);
       inner += text(w / 2, 268, 'Someone is always awake.', `font-size="12" letter-spacing=".5" fill="${GREY}" text-anchor="middle"`);
+    } else if (kind === 'ticket') {
+      // a service ticket (`report <unit>`; Arnold, 2026-10-12): the company's form, typed; what the operator wrote typed in
+      // their own manner (words), a line in their own hand beside it where they had one (hand: { text, font }), and on yours,
+      // come back down, Facilities' stamp, DUPLICATE, in red. Draft words; the stamp a placeholder.
+      inner += text(w - 28, 42, 'SITE 4', `font-weight="600" font-size="13" letter-spacing="2" fill="${GREY}" text-anchor="end"`);
+      inner += text(28, 66, 'SERVICE TICKET · FACILITIES', `font-size="12" letter-spacing="1.5" fill="${GREY}"`);
+      inner += text(w - 28, 66, 'No. ' + String(no).padStart(4, '0'), `font-size="12" letter-spacing="1" fill="${GREY}" text-anchor="end"`);
+      inner += rule(84);
+      inner += text(28, 116, 'UNIT', `font-size="11" letter-spacing="1.5" fill="${GREY}"`) + text(72, 116, unit, `font-size="18" fill="${TYPE}"`);
+      inner += text(196, 116, 'FAULT', `font-size="11" letter-spacing="1.5" fill="${GREY}"`) + text(250, 116, fault, `font-size="18" fill="${TYPE}"`);
+      words.forEach((t, i) => { inner += text(28, 152 + i * 28, t, `font-size="16" fill="${TYPE}"`); });
+      inner += rule(210);
+      inner += text(28, 246, 'FILED BY', `font-size="11" letter-spacing="1.5" fill="${GREY}"`) + text(104, 246, by, `font-size="14" fill="${TYPE}"`);
+      inner += text(190, 246, date, `font-size="14" fill="${TYPE}"`);
+      inner += text(w - 98, 246, 'STATUS', `font-size="11" letter-spacing="1.5" fill="${GREY}" text-anchor="end"`) + text(w - 28, 246, 'OPEN', `font-size="14" fill="${TYPE}" text-anchor="end"`);
+      if (hand) inner += `<text x="${w - 40}" y="186" font-family="${hand.font}" font-size="30" fill="#5A5A6A" text-anchor="end" transform="rotate(-4 ${w - 40} 186)">${esc(hand.text)}</text>`;
+      if (dup) inner += `<g transform="rotate(-9 ${w - 150} 150)"><rect x="${w - 262}" y="124" width="224" height="52" rx="4" fill="none" stroke="${RED}" stroke-width="2.5"/>`
+        + text(w - 150, 161, 'DUPLICATE', `font-weight="700" font-size="26" letter-spacing="4" fill="${RED}" text-anchor="middle"`) + '</g>';
     } else if (kind === 'memo') {
       inner += text(w - 28, 42, 'MEMO', `font-weight="600" font-size="13" letter-spacing="2" fill="${GREY}" text-anchor="end"`);
       inner += text(28, 66, 'INTEROFFICE · SITE 4', `font-size="12" letter-spacing="1.5" fill="${GREY}"`);

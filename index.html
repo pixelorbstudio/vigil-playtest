@@ -8,6 +8,10 @@
 <link rel="stylesheet" href="style.css?v=61291d69aa">
 </head>
 <body>
+<!-- the save's version (vigil.save; 2026-10-12): a save from an older build starts fresh at shift 1, as the menu's start over
+     does (every vigil.* but the volume, the hum and a playtester's log), instead of carrying into a shift it can't play (a
+     tester's old save went straight into shift 4, night 3, not built). Bump SAVE when a build can't take an older save. -->
+<script>try { const SAVE = '2', keep = ['vigil.volume', 'vigil.hum', 'vigil.playtest', 'vigil.save']; if (localStorage.getItem('vigil.save') !== SAVE) { const old = Object.keys(localStorage).filter(k => k.startsWith('vigil.') && !keep.includes(k)); for (const k of old) localStorage.removeItem(k); if (old.length) window.vigilSaveReset = old.length; localStorage.setItem('vigil.save', SAVE); } } catch (e) {}</script>
 <!-- a lost night's reboot, on any shift: black from the first paint, the blink (app.js, the night's end); otherwise the
      title, black from the first paint until the desk, the monitor, the keyboard and the mug are drawn (app.js, the title;
      ?notitle leaves it out, for the audits and stills pages) -->
@@ -56,10 +60,10 @@
   </div>
 </div>
 
-<!-- for playtesters (?playtest): what this build is (Arnold, 2026-10-06; the story audit: night 3 repeats forever), top
+<!-- for playtesters (?playtest): what this build is (Arnold, 2026-10-06; 2026-10-12: the playtest ends after night 2), top
      left, clear of the hint at every width; the log is saved from the Esc menu (the hum, the key sounds and the log were
      buttons here until the cold playtest's dry run, 2026-10-11: they are the menu's now) -->
-<p id="build-note" hidden>playtest build: night 1 is the game. nights 2 and 3 are unfinished, and night 3 repeats. esc to save your log.</p>
+<p id="build-note" hidden>playtest build: it runs through night 2, which is rough. esc saves your log.</p>
 <div id="hud">
   <span id="hint">start typing · try the knobs · sip the coffee</span>
 </div>
@@ -78,7 +82,7 @@
 <script src="traces.js?v=1a85383ec1"></script>
 <script src="sheet.js?v=401bc3f7c1"></script>
 <script src="lathe.js?v=56e33e3084"></script>
-<script src="delivery.js?v=b70ca3b272"></script>
+<script src="delivery.js?v=cfe517f8b5"></script>
 <script src="mdrawer.js?v=8c987ac9ed"></script>
 <script src="mtray.js?v=6cbd206e5a"></script>
 <script src="ceiling.js?v=57075057d6"></script>
@@ -86,7 +90,7 @@
 <script src="pathlen.js?v=729fff44d6"></script>
 <script src="post.js?v=b90d88c751"></script>
 <script src="camera.js?v=d31304a961"></script>
-<script src="shift.js?v=097f1478e1"></script>
+<script src="shift.js?v=e04e2a5b5e"></script>
 <script src="board.js?v=30281745bb"></script>
 <script src="defrag.js?v=a6fc69a2d7"></script>
 <script src="route.js?v=34870ff2b0"></script>
@@ -94,7 +98,7 @@
 <script src="power.js?v=560d997c54"></script>
 <script src="firewall.js?v=cf801880dc"></script>
 <script src="pong.js?v=ac46105ad2"></script>
-<script src="crt.js?v=b69939961e"></script>
-<script src="app.js?v=d25b80f8c8"></script>
+<script src="crt.js?v=5dc0cfedd0"></script>
+<script src="app.js?v=8290e8e750"></script>
 </body>
 </html>
