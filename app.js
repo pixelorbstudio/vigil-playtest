@@ -363,11 +363,54 @@
       await Promise.all([wait(b.shut * 1000), b.whileShut ? b.whileShut() : null]);
       await to(1, 1, b.open * 1000);
     }
-    // heavy and slow, partway and back (the first sleep's drooping): the upper lid to u, the lower to d
-    async function droop(u, d, close = .9, hold = .3, open = 1) {
-      if (!await to(u, d, close * 1000, { up: [0, 1], down: [.2, 1] })) return;
-      await wait(hold * 1000);
-      await to(1, 1, open * 1000, { up: [.15, 1], down: [0, .8] });
+    // ---- human timing (Arnold, 2026-10-11: the eyes close only where it is the story, and each time as a person's do: heavy,
+    // uneven, a lid that half closes, flutters, closes, opens late; never a neat curve). A movement is a list of steps, each
+    // [seconds, upper lid, lower lid, easing] from wherever the lids are, or ['hold', seconds or a function to wait on]; each
+    // time it plays, every step's length and every partway openness move a little at random (6%, 0.03), so no two are alike.
+    // The lower lid moves less, and leads when they open.
+    const EZ = { in: u => u * u, out: u => 1 - (1 - u) * (1 - u), io: u => u * u * (3 - 2 * u) };
+    function step(mine, tu, td, ms, ez) {
+      const from = [up, down], t0 = performance.now();
+      return new Promise(done => {
+        // (once: the timer that finishes a step when frames stop came after the next step had begun, and threw the lids back
+        // to this step's end for a frame)
+        let finished = false;
+        const end = () => { if (finished) return; finished = true; if (mine !== run) return done(false); set(tu, td); done(true); };
+        if (ms <= 0) return end();
+        const tick = () => { if (finished) return; if (mine !== run) return done(false); const u = (performance.now() - t0) / ms; if (u >= 1) return end(); const k = ez(u); set(from[0] + (tu - from[0]) * k, from[1] + (td - from[1]) * k); requestAnimationFrame(tick); };
+        requestAnimationFrame(tick); setTimeout(end, ms + 60);
+      });
+    }
+    async function play(steps, { scale = 1, jitter = true } = {}) {
+      const mine = ++run, j = (v, a) => jitter ? v + (Math.random() * 2 - 1) * a : v, open = v => v > 0 && v < 1 ? clamp(j(v, .03), .02, .98) : v;
+      for (const st of steps) {
+        if (mine !== run) return false;
+        if (st[0] === 'hold') { await (typeof st[1] === 'function' ? st[1]() : wait(j(st[1], st[1] * .06) * 1000 * scale)); continue; }
+        if (!await step(mine, open(st[1]), open(st[2]), j(st[0], st[0] * .06) * 1000 * scale, EZ[st[3] || 'io'])) return false;
+      }
+      return true;
+    }
+    // the tracks
+    const TRACK = {
+      // coming to at the desk (the start): a heavy droop to half, a catch, a flutter, then shut; held (the start's swap waits
+      // in there); open late, the lower lid first, a hitch partway, a small sag back, then open
+      comeTo: hold => [[.34, .52, .86], [.09, .66, .9, 'out'], [.07, .44, .82], [.06, .57, .86, 'out'], [.05, .5, .84], [.22, 0, 0, 'in'],
+        ['hold', hold], [.12, .18, .55, 'out'], [.1, .23, .6], [.16, .62, .88, 'out'], [.06, .55, .86], [.28, 1, 1, 'out']],
+      // the eyes closing, heavy (the night's end): the upper lid leads, catches once, then shut
+      close: [[.11, .35, .8, 'in'], [.05, .42, .83, 'out'], [.13, 0, 0, 'in']],
+      // opening on the room (the next night, a lost night's reboot): late, the lower lid first, a hitch, a sag, then open
+      open: [[.14, .2, .6, 'out'], [.09, .24, .63], [.13, .7, .92, 'out'], [.05, .63, .9], [.22, 1, 1, 'out']],
+      // jolted awake (the first sleep let go): quick, with one catch
+      wake: [[.07, .6, .9, 'out'], [.04, .55, .88], [.1, 1, 1, 'out']],
+      // falling asleep: drifting down, a struggle back up, down again, one more flutter, then shut
+      sleep: [[.6, .45, .85], [.15, .6, .9, 'out'], [.5, .2, .75], [.12, .32, .78, 'out'], [.45, 0, 0, 'in']],
+    };
+    // heavy and slow, partway and back (the first sleep's drooping): the upper lid to u, the lower to d, over close; held;
+    // open over open. Uneven: it catches on the way down and hitches on the way up
+    function droop(u, d, close = .9, hold = .3, open = 1) {
+      const mid = (a, k) => a + (1 - a) * k;
+      return play([[close * .6, mid(u, .3), mid(d, .3)], [.1, mid(u, .42), mid(d, .4), 'out'], [close * .4, u, d, 'in'], ['hold', hold],
+        [open * .45, mid(u, .55), mid(d, .7), 'out'], [.1, mid(u, .48), mid(d, .66)], [open * .45, 1, 1, 'out']]);
     }
     // shut, with the fall-asleep screen over them (it is inside the stage, under this layer): that screen holds the dark,
     // opaque (#night-over.shut), and the lids step aside until the eyes open (cover(false))
@@ -375,7 +418,9 @@
     // (drawn once nearly shut while the page is still black, the start's close-up not yet shown: the GPU readies what it draws
     // the lids with then, not in the first blink, where it cost a frame of 50 to 160 ms; the final sweep's live audit)
     const warm = async () => { if (up < 1 || down < 1) return; set(.04, .04); await new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r))); if (up === .04 && down === .04) set(1, 1); };
-    return { set, to, blink, droop, blinkAt, lens, LID, cover, warm, close: (ms = 180) => to(0, 0, ms), open: (ms = 260) => to(1, 1, ms), shut: () => { run++; set(0, 0); }, get state() { return [up, down]; } };
+    return { set, to, blink, droop, blinkAt, lens, LID, cover, warm, play, TRACK,
+      close: () => play(TRACK.close), open: (scale = 1) => play(TRACK.open, { scale }), wake: () => play(TRACK.wake), sleep: (scale = 1) => play(TRACK.sleep, { scale }),
+      comeTo: hold => play(TRACK.comeTo(hold)), shut: () => { run++; set(0, 0); }, get state() { return [up, down]; } };
   })();
 
   // the title is up (below, "the title"): the keys move its choices and go down silent, the room takes no clicks, and the
@@ -2638,6 +2683,9 @@
   addEventListener('mouseleave', () => { tx = 0; ty = 0; });
   (function tick() {
     cx += (tx + lean.x - cx) * .08; cy += (ty + lean.y + look.lean - cy) * .08;
+    // (none through the start, from the first paint until the camera has settled: its flight's copies are made with the room as
+    // it is then, and the room behind them must stay as they show it; from there it eases to the cursor as always)
+    if (document.body.classList.contains('title')) cx = cy = 0;
     for (const { el, depth, isTerminal } of layered) {
       const dx = cx * depth * 9, dy = cy * depth * 6;
       if (isTerminal) el.style.transform = `translate(${dx}px, ${dy}px) ${baseMatrix}`;
@@ -5142,7 +5190,7 @@
     }
     // the blink, after every loop on every shift (design.md section 5, "Surface and focus, decided", 2): the eyes close for a
     // beat; they open on the next night, 23:00, the mug full and steaming (after the first sleep they are already shut)
-    if (!firstSleep) await eyes.close(180);
+    if (!firstSleep) await eyes.close();
     eyes.shut(); playtest('the blink');
     clockHeld = true;                                  // (the clock readout keeps its last minute in the dark)
     account.loggingIn = true;                          // the clock waits for the login
@@ -5151,7 +5199,7 @@
     eyes.cover(false);                               // (shut: the lids hold the dark again, the screen can go)
     if (firstSleep) { drowse(0); nightOver.hidden = true; nightOver.classList.remove('shown'); $('no-what').hidden = $('no-choices').hidden = false; }
     term.clear();
-    await wait(800); await eyes.open(300); await wait(600);
+    await wait(800); await eyes.open(); await wait(600);
     logLine(`vigild[1]: operator ${account.user} clocked in, 0 minutes later`);
     // and back on by itself (turned on by hand in the dark, it just boots a moment sooner; after the first sleep it was
     // never off, and simply boots)
@@ -5178,7 +5226,7 @@
     asleep = true;                                   // nothing more happens in the room
     // one more scratch in the desk's edge, there when the room comes back (design.md: the tally marks)
     try { localStorage.setItem('vigil.lost', String(lostNights + 1)); } catch (e) {}
-    if (r.reason === 'asleep') eyes.to(0, 0, 1700, { up: [0, 1], down: [.25, 1] });   // (the eyes close: Arnold, 2026-10-11)
+    if (r.reason === 'asleep') eyes.sleep(.93);   // (the eyes close, as a person's do, fighting it: Arnold, 2026-10-11)
     else lookEl.classList.add('dark');               // (three strikes: the room goes dark, as ever)
     document.body.classList.add('lost');
     document.getElementById('no-what').textContent = r.reason === 'asleep'
@@ -5230,12 +5278,12 @@
     const DROOPS = [[3.5, .62, .93, .9, .3, 1], [8, .46, .88, 1.1, .45, 1.2], [12, .32, .84, 1.3, .6, 1.3], [15.5, .2, .8, 1.5, .8, 1.5]];
     for (const [at, u, d, c, h, o] of DROOPS) setTimeout(() => { if (!gone() && asleepOK()) eyes.droop(u, d, c, h, o); }, at * 1000);
     let asleepOK = () => true;
-    while (performance.now() - t0 < MS) { if (gone()) { drowse(0); asleepOK = () => false; eyes.open(200); return; } drowse(Math.min(1, (performance.now() - t0) / MS) ** 1.4); await wait(200); }
+    while (performance.now() - t0 < MS) { if (gone()) { drowse(0); asleepOK = () => false; eyes.wake(); return; } drowse(Math.min(1, (performance.now() - t0) / MS) ** 1.4); await wait(200); }
     drowse(1);
     await wait(1200);
     while (!gone() && (holding() || dlv.busy || !term.inShell())) await wait(250);   // (whatever was picked up meanwhile is put down first)
-    if (gone()) { drowse(0); eyes.open(200); return; }
-    await eyes.to(0, 0, 1800, { up: [0, 1], down: [.25, 1] });   // (the eyes close, slowly: the dark it falls into)
+    if (gone()) { drowse(0); eyes.wake(); return; }
+    await eyes.sleep();   // (the eyes close, slowly, fighting it: the dark it falls into)
     eyes.cover(true);                                // (the fall-asleep screen holds the dark over them)
     playtest('the first sleep: black, "not yet."');
     seen.mark('notyet', '*');                         // (the first time anyone sees it: whole length; after a lost night it comes sooner)
@@ -7900,8 +7948,11 @@
     // the timeline, seconds after the choice (Arnold, 2026-10-11: the warm-up brief, the BIOS soon)
     // (2026-10-11, from every frame: the BIOS boots at once, its first line at 0.45 s, and the camera eases out of the close-up
     // sooner: smoothstep, still at both ends but not lingering as the quintic did; the empty blue was 0.7 s)
-    const SEQ = { glass: .3, bios: .25, pull: [.1, 3.4], settle: 3.8,
-      blinks: [{ at: 2.25, close: .16, shut: .1, open: .26 }, { at: 3.5, close: .11, shut: .04, open: .17 }] };
+    // (Arnold, 2026-10-11, later: one blink, not two, and a person's: slow and heavy, like coming to at the desk (eyes.TRACK
+    // .comeTo). It starts as the camera eases in, so the lids droop and flutter over the move's last part and shut just after
+    // it ends; the swap back from the flight is held inside it; the room is the player's once the eyes are open. settle: the
+    // latest that can happen, if the blink never came: a hidden tab)
+    const SEQ = { glass: .3, bios: .25, pull: [.1, 3.4], blink: 2.65, settle: 6 };
     const ease = u => { u = Math.max(0, Math.min(1, u)); return u * u * (3 - 2 * u); };
     let C = null, S0 = 1, t0 = 0, PAN0 = [0, 0], unit = 1, wraps = null, posed = false, faceM = null;
     const face = screenG.querySelector('svg path:nth-of-type(2)');
@@ -7942,8 +7993,8 @@
     // (the close-up, s < 0: the glass covers the window, so only the monitor's layer is drawn. Every other layer was drawn and
     // animated behind it at three times its size, the rack LEDs and the ceiling camera repainting the room each frame: 6 s
     // of the main thread's 15 at 1280 x 720; the final sweep's live audit, 2026-10-11)
-    function pose(s) {
-      const c = camAt(s), shut = s < 0, ahead = z => z - c.t * ZTUBE >= NEAR, shown = l => ahead(ZM[l.z]) && (!shut || l.z === 'monitor');
+    function pose(s, all = false) {
+      const c = camAt(s), shut = s < 0 && !all, ahead = z => z - c.t * ZTUBE >= NEAR, shown = l => ahead(ZM[l.z]) && (!shut || l.z === 'monitor');
       const rn = kOf(ZM.mug, c) / kOf(ZM.desk, c);
       if (flight) {
         for (const f of flight.layers) { const on = ahead(ZM[f.z]); if (f.on !== on) { f.svg.style.visibility = on ? '' : 'hidden'; f.on = on; } if (on) f.at(mat(kOf(ZM[f.z], c), c)); }
@@ -8008,10 +8059,33 @@
         svg.classList.add('cam-flight', 'parked');
         const g = src.cloneNode(true); g.removeAttribute('transform'); g.style.display = ''; g.style.visibility = '';
         if (drop) g.querySelector('#' + drop)?.remove();
-        svg.appendChild(g); R.after.after(svg); R.after = svg;
+        svg.appendChild(g); own(svg, g); R.after.after(svg); R.after = svg;
         // a stage matrix as the box's CSS transform (the box's origin is the viewBox's corner, o in stage px)
         return { svg, z, on: true, at: M => { svg.style.transform = `matrix(${M[0]},${M[1]},${M[2]},${M[3]},${M[4] + o[0] - (M[0] * o[0] + M[2] * o[1])},${M[5] + o[1] - (M[1] * o[0] + M[3] * o[1])})`; } };
       };
+      // A copy's own definitions (clip paths, gradients, masks, filters, anything referenced as url(#id) or href="#id"): those
+      // inside it renamed, those in another original cloned into its defs under a new name, so it never draws through the
+      // hidden originals. (The tube's pipe is clipped at the ceiling by a clip path in the station: through the original,
+      // hidden by visibility, the clip was empty, as hidden children of a clip path are, and the pipe showed only its
+      // outlines until the swap; the final sweep's live audit, Arnold, 2026-10-11.) Definitions outside every original
+      // (the overlay's defs: the screen's clip, the glare's blurs) are left as they are: they aren't hidden.
+      const hiddenRoots = [...wraps.layers.map(l => l.w.g), wraps.glass.g, wraps.mug3d.g, wraps.steam.g];
+      const REF = /url\(\s*['"]?#([^'")\s]+)['"]?\s*\)/g;
+      let uid = 0;
+      function own(svg, g) {
+        const refs = new Set(), scan = el => { for (const a of el.attributes) { for (const m of a.value.matchAll(REF)) refs.add(m[1]); if ((a.name === 'href' || a.name === 'xlink:href') && a.value[0] === '#') refs.add(a.value.slice(1)); } };
+        scan(g); g.querySelectorAll('*').forEach(scan);
+        const names = new Map(), defs = document.createElementNS(SVG, 'defs');
+        for (const id of refs) {
+          const inside = g.querySelector('[id="' + CSS.escape(id) + '"]'), orig = document.getElementById(id);
+          if (inside) { const n = id + '-fly' + (++uid); inside.id = n; names.set(id, n); }
+          else if (orig && hiddenRoots.some(r => r.contains(orig))) { const c = orig.cloneNode(true), n = id + '-fly' + (++uid); c.id = n; c.style.visibility = 'visible'; defs.appendChild(c); names.set(id, n); }
+        }
+        if (!names.size) return;
+        if (defs.childNodes.length) svg.insertBefore(defs, svg.firstChild);
+        const fix = el => { for (const a of [...el.attributes]) { let v = a.value.replace(REF, (m, id) => names.has(id) ? `url(#${names.get(id)})` : m); if ((a.name === 'href' || a.name === 'xlink:href') && names.has(v.slice(1))) v = '#' + names.get(v.slice(1)); if (v !== a.value) el.setAttribute(a.name, v); } };
+        fix(g); g.querySelectorAll('*').forEach(fix);
+      }
       const layers = [];
       // (in the scene's own order, bottom first: the room frame, wrapped last, is its first child)
       for (const l of [...wraps.layers].sort((a, b) => a.w.g.compareDocumentPosition(b.w.g) & Node.DOCUMENT_POSITION_FOLLOWING ? -1 : 1)) {
@@ -8020,7 +8094,9 @@
           // the note: its wrap, copied with the transform its parent space has in the scene (wraps.note.P)
           const P = wraps.note.P, g = document.createElementNS(SVG, 'g'); g.setAttribute('transform', `matrix(${[P.a, P.b, P.c, P.d, P.e, P.f].join(' ')})`);
           g.appendChild(wraps.note.g.cloneNode(true)); g.firstChild.removeAttribute('transform');
-          flight = { layers, note: copy(g, 'note') };
+          // (in a group of its own: copy() takes the outermost transform off, the camera's, and this one is the note's place)
+          const outer = document.createElementNS(SVG, 'g'); outer.appendChild(g);
+          flight = { layers, note: copy(outer, 'note') };
         }
       }
       if (!flight) flight = { layers, note: { svg: document.createElementNS(SVG, 'svg'), on: false, at: () => {} } };
@@ -8038,6 +8114,23 @@
       for (const w of [wraps.glass, wraps.mug3d, wraps.steam]) w.g.style.visibility = '';
       for (const f of [...flight.layers, flight.note, ...flight.over]) f.svg.remove();
       flight = null;
+    }
+    // (?dev: the copies or the originals posed at s, the other hidden, for comparing them pixel by pixel)
+    let parkedFlight = null;
+    function compare(mode, s) {
+      if (mode === 'originals') {
+        if (flight) { parkedFlight = flight; flight = null; }
+        for (const f of [...parkedFlight.layers, parkedFlight.note, ...parkedFlight.over]) f.svg.style.display = 'none';
+        for (const l of wraps.layers) l.w.g.style.visibility = '';
+        for (const w of [wraps.glass, wraps.mug3d, wraps.steam]) w.g.style.visibility = '';
+        pose(s, true);
+      } else {
+        if (parkedFlight) { flight = parkedFlight; parkedFlight = null; }
+        for (const f of [...flight.layers, flight.note, ...flight.over]) f.svg.style.display = '';
+        for (const l of wraps.layers) l.w.g.style.visibility = 'hidden';
+        for (const w of [wraps.glass, wraps.mug3d, wraps.steam]) w.g.style.visibility = 'hidden';
+        pose(s);
+      }
     }
     // the rest: every transform gone, the tube's resolution its own
     function rest() {
@@ -8125,8 +8218,11 @@
       // (the shut frame on the screen first, then the swap, then the eyes open only when frames come steadily again: the
       // swap's frame is slow to draw, and in the same frame as the shut lids it left them half shut on the screen through it,
       // then opening, they jumped open; the final sweep's live audit)
-      const settle = async () => { if (rested) return; rested = true; await nextFrames(2); rest(); await steady(); };
-      SEQ.blinks.forEach((b, i) => setTimeout(() => eyes.blink(i === SEQ.blinks.length - 1 ? { ...b, whileShut: settle } : b), b.at * 1000));
+      // (never before the move has ended: the copies must be at rest, matching the originals, when they swap)
+      const settle = async () => { if (rested) return; rested = true; while ((performance.now() - pullAt) / 1000 < SEQ.pull[1] + .02) await nextFrames(1); await nextFrames(2); rest(); await steady(); };
+      let handed = false;
+      const handBack = () => { if (handed) return; handed = true; catcher.style.display = 'none'; document.body.classList.remove('title'); face.style.transition = ''; playtest('start: the camera settled'); };
+      setTimeout(() => eyes.comeTo(() => Promise.all([wait(250), settle()])).then(handBack), SEQ.blink * 1000);
       let prevT = 0; frameMs = [];
       (function tick() {
         const now = performance.now(), s = (now - pullAt) / 1000;
@@ -8134,8 +8230,7 @@
         if (s >= SEQ.pull[1]) { pose(SEQ.pull[1]); return; }
         pose(s); requestAnimationFrame(tick);
       })();
-      setTimeout(settle, (SEQ.blinks.at(-1).at + 1) * 1000);   // (no blink came, or frames stopped in a hidden tab: it still ends)
-      setTimeout(() => { catcher.style.display = 'none'; document.body.classList.remove('title'); face.style.transition = ''; playtest('start: the camera settled'); }, SEQ.settle * 1000);
+      setTimeout(async () => { await settle(); handBack(); }, SEQ.settle * 1000);   // (no blink came, or frames stopped in a hidden tab: it still ends)
       return wait(SEQ.bios * 1000);
     }
     // the page's start: resolves when the BIOS is to boot (the camera still moving)
@@ -8156,7 +8251,7 @@
       playtest('start: ' + (how === 'new' ? 'new shift' : 'continue') + ', the camera pulls back');
       return pull();
     }
-    return { run, pose: s => (wrap(), frame(), pose(s)), rest, SEQ, get up() { return titleUp; } };
+    return { run, pose: s => (wrap(), frame(), pose(s)), rest, compare, SEQ, get up() { return titleUp; } };
   })();
   if (new URLSearchParams(location.search).has('dev')) { window.__start = start; window.__eyes = eyes; }   // (the audits pose the camera and the lids)
 
@@ -8171,7 +8266,7 @@
       try { localStorage.removeItem('vigil.blink'); } catch (e) {}
       playtest('the blink');
       eyes.shut(); document.body.classList.remove('blink');
-      await wait(700); await eyes.open(300);
+      await wait(700); await eyes.open(1.25);   // (waking: slower)
     }
     await wait(500);
   }
