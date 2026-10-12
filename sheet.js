@@ -44,7 +44,8 @@
     { k: 'OOM', t: 'out of memory:', y: -20 },
     { t: 'put in the HEAP cart,', y: -12, cont: true },
     { t: 'type  heap + the unit', y: -4, cont: true },
-    { k: 'INTRUSION', t: 'someone probing it:', y: 6 },
+    // (2026-10-12, step 9: PROBED, the word the strip, top and status show for it, so the card matches the tube)
+    { k: 'PROBED', t: 'someone probing it:', y: 6 },
     { t: 'put in the FIREWALL cart,', y: 14, cont: true },
     { t: 'type  firewall + the unit', y: 22, cont: true },
   ];

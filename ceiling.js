@@ -93,11 +93,54 @@
     }
     // the glint: a small bright sliver of metal in the gap (the key's bow catching the light), a lozenge 4.8 by 2.2 px
     function glintSvg([s, t]) { const c = coons([s, t]); return `<path d="M${(c[0] - 2.4).toFixed(2)},${c[1].toFixed(2)}L${c[0].toFixed(2)},${(c[1] - 1.1).toFixed(2)}L${(c[0] + 2.4).toFixed(2)},${c[1].toFixed(2)}L${c[0].toFixed(2)},${(c[1] + 1.1).toFixed(2)}Z" fill="#FFFFFF" stroke="#E2E2E0" stroke-width=".6" stroke-linejoin="round"/>`; }
-    return { TL, TR, BL, BR, cell, cellH, coons, tileLoop, svg, hit: fmt(cell) };
+    return { TL, TR, BL, BR, cell, cellH, coons, tileLoop, svg, hit: fmt(cell), cable: (lift, tilt, pull) => cable(coons, cellH, lift, tilt, pull) };
+  }
+  /* ---- the camera's cable (night 2; design.md section 5, "The camera's arc, decided", 2; 2026-10-12, build step 9; a listed
+     placeholder for Arnold's art). Up in the dark behind the pushed-aside tile, a cable droops out from under the tile's
+     lower edge and goes back up behind it: a band CABLE.w px wide, flat-filled, its two sides in the drawing's one-pixel line,
+     its ends hidden under the tile (the tile is drawn over it). Pulled (pull 1), its right end has come free: it hangs from
+     under the edge and lies along the gap, its plug at the end. pull between 0 and 1 is the yank, each point of the line
+     moved straight from the one shape to the other in the cell's own (s, t). Everything is in the Coons patch's (s, t), so it
+     follows the drawing's curves; the line is sampled every 0.2 px of the screen, its sides offset along the screen normal.
+     lift, tilt: the tile's, in px (the page's, scaled); the gap is t from 1 - d(s) to 1. Returns { svg, hit, line, sides }
+     (line, sides for the audit). */
+  const CABLE = { w: 6.5, s: [.5, .86], sag: .62, loose: .26, lay: .7, fill: '#DCDCDA', plug: { l: 12, w: 10, r: 2.2, fill: '#E6E6E4' } };
+  function cable(coons, cellH, lift, tilt, pull = 0) {
+    const d = s => (lift + tilt * (1 - s)) / cellH, [s0, s1] = CABLE.s, V0 = -.12;
+    // looped, v from V0 to 1 - V0: under the edge at both ends (t above 1 - d)
+    const loop = w => { const v = V0 + (1 - 2 * V0) * w, s = s0 + (s1 - s0) * v; return [s, 1 - d(s) + d(s) * CABLE.sag * Math.sin(Math.PI * v)]; };
+    // loose, v from V0 to 1: from under the edge, down, then along the gap to its end, lying level there
+    const loose = w => { const v = V0 + (1 - V0) * w, s = s0 + CABLE.loose * v, f = v < 0 ? 2 * v : 1 - (1 - v) * (1 - v); return [s, 1 - d(s) + d(s) * CABLE.lay * f]; };
+    const at = w => { const a = loop(w), b = loose(w); return coons([a[0] + (b[0] - a[0]) * pull, a[1] + (b[1] - a[1]) * pull]); };
+    // sampled every 0.2 px of the screen (by a fine pass to measure, then by length)
+    const fine = Array.from({ length: 801 }, (_, i) => at(i / 800)), L = [0];
+    for (let i = 1; i < fine.length; i++) L.push(L[i - 1] + Math.hypot(fine[i][0] - fine[i - 1][0], fine[i][1] - fine[i - 1][1]));
+    const total = L[L.length - 1], n = Math.ceil(total / .2), line = [];
+    for (let k = 0, j = 0; k <= n; k++) { const dd = total * k / n; while (j < L.length - 2 && L[j + 1] < dd) j++; const u = (dd - L[j]) / (L[j + 1] - L[j] || 1); line.push([fine[j][0] + (fine[j + 1][0] - fine[j][0]) * u, fine[j][1] + (fine[j + 1][1] - fine[j][1]) * u]); }
+    // the screen normal at each point (from its neighbours), and the sides
+    const nrm = line.map((p, i) => { const a = line[Math.max(0, i - 1)], b = line[Math.min(line.length - 1, i + 1)], dx = b[0] - a[0], dy = b[1] - a[1], m = Math.hypot(dx, dy) || 1; return [-dy / m, dx / m]; });
+    const side = k => line.map((p, i) => [p[0] + nrm[i][0] * k, p[1] + nrm[i][1] * k]);
+    // (each side sampled again by its own length: the outer side of a bend is longer than the line, its steps stretched)
+    const even = ps => { const out = [ps[0]]; for (let i = 1; i < ps.length; i++) { const p = out[out.length - 1], q = ps[i], m = Math.ceil(Math.hypot(q[0] - p[0], q[1] - p[1]) / .2); for (let k = 1; k <= m; k++) out.push([p[0] + (q[0] - p[0]) * k / m, p[1] + (q[1] - p[1]) * k / m]); } return out; };
+    const A = even(side(CABLE.w / 2)), B = even(side(-CABLE.w / 2));
+    const P = ps => ps.map(q => q[0].toFixed(3) + ',' + q[1].toFixed(3)).join(' ');
+    const INK = 'fill="none" stroke="#B4B4B4" stroke-width="1" stroke-linejoin="round" stroke-linecap="round"';
+    let svg = `<polygon points="${P([...A, ...B.slice().reverse()])}" fill="${CABLE.fill}"/><path d="M${P(A).split(' ').join('L')}" ${INK}/><path d="M${P(B).split(' ').join('L')}" ${INK}/>`;
+    // the plug, once it is out of its socket: a rounded block on the end, along the line (its corners sampled every 0.2 px)
+    if (pull > 0) {
+      const e = line[line.length - 1], q = line[Math.max(0, line.length - 6)], tx = (e[0] - q[0]) / (Math.hypot(e[0] - q[0], e[1] - q[1]) || 1), ty = (e[1] - q[1]) / (Math.hypot(e[0] - q[0], e[1] - q[1]) || 1);
+      const { l, w: pw, r } = CABLE.plug, pts = [];
+      const corner = (cx, cy, a0) => { const m = Math.ceil(Math.PI / 2 * r / .2); for (let i = 0; i <= m; i++) { const a = a0 + Math.PI / 2 * i / m; pts.push([cx + r * Math.cos(a), cy + r * Math.sin(a)]); } };
+      corner(l - r, pw / 2 - r, 0); corner(r, pw / 2 - r, Math.PI / 2); corner(r, -pw / 2 + r, Math.PI); corner(l - r, -pw / 2 + r, 3 * Math.PI / 2);
+      const toScreen = ([x, y]) => [e[0] + tx * x - ty * y, e[1] + ty * x + tx * y];
+      svg += `<polygon points="${P(pts.map(toScreen))}" fill="${CABLE.plug.fill}" stroke="#B4B4B4" stroke-width="1" stroke-linejoin="round"/>`;
+    }
+    const hitA = side(10), hitB = side(-10);
+    return { svg, hit: P([...hitA, ...hitB.slice().reverse()]), line, sides: [A, B] };
   }
   // where the tile is in each state: [lift, tilt] (px); and where the glint and the key are in the gap
   // (out: the stills' 5 px at the thin end put the tile's edge 5 px from the grid's line; 6.5 keeps the rule's 6)
   const STATES = { flush: [0, 0], out: [6.5, 10], peek: [18, 5], aside: [38, 12] };
   const GLINT = { peek: [.22, .86], out: [.22, .93] }, KEY_AT = [.3, .97];
-  window.ceilingTile = { build, STATES, GLINT, KEY_AT, AT };
+  window.ceilingTile = { build, STATES, GLINT, KEY_AT, AT, CABLE };
 })();

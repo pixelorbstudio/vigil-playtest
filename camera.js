@@ -27,7 +27,10 @@
      only at those moments (a steady pulse would read as loading; this reads as it looking). Not while it is blind (the
      page passes `blind`: night 2's hook). st.focus is the lens's scale now (1 at rest).
    - clicked (Arnold, 2026-10-11): it freezes where it is for FREEZE.ms (freeze(st)), a beat instead of following, its
-     patrol or a turn paused with it, then goes back to what it was doing from a standstill. */
+     patrol or a turn paused with it, then goes back to what it was doing from a standstill.
+   - dead (night 2, its cable pulled above the tile: the camera's arc, 2; 2026-10-12, build step 9): sag(st). The lens sags
+     down to the range's bottom (16 down, the yaw easing toward the middle), slowly at first and faster, as a dead servo lets
+     go, and stays there: no following, no patrol, no turn, no refocus, ever after (mode 'dead'). Inside the audited range. */
 (function () {
   const CU = typeof window !== 'undefined' && window.ceilingUp ? window.ceilingUp : require('./ceilup.js');
   const H = 2198;                                       // mm: the ceiling above the eye
@@ -173,8 +176,15 @@
   // a refocus begins (one at a time; not while blind)
   const refocus = (st, input) => { if (!input.blind && !st.refocus) st.refocus = { t: 0 }; };
   const rand = st => (st.rnd = (st.rnd * 16807) % 2147483647) / 2147483647;
+  // dead: the servo lets go (night 2's cable): the lens sags to the range's bottom and stays (eased in: slow, then faster)
+  const SAG = { speed: 9, yaw: .6 };
+  function sag(st) {
+    if (st.mode === 'dead') return;
+    st.mode = 'dead'; st.move = glide(st.ang, [st.ang[0] * SAG.yaw, RANGE.down], SAG.speed); st.patrol = null; st.refocus = null; st.vel = [0, 0]; st.frozen = 0;
+  }
   // deliberate: turn to a point (or a turn) and hold
   function deliberate(st, to) {
+    if (st.mode === 'dead') return;
     const t = Array.isArray(to) && to.length === 2 ? clampAng(to) : turnTo(to);
     st.mode = 'turn'; st.move = glide(st.ang, t, TURN.speed); st.held = 0; st.patrol = null;
   }
@@ -183,6 +193,13 @@
   // input: { u, v (the cursor), idleMs (since the last input), seen (the camera can be seen: looking ahead) }
   function step(st, dt, input) {
     const before = st.ang.slice();
+    if (st.mode === 'dead') {
+      const m = st.move;
+      if (m && m.t < m.ms) { m.t = Math.min(m.ms, m.t + dt); const u = m.t / m.ms, k = u * u * u * (2 - u); st.ang = [m.from[0] + (m.to[0] - m.from[0]) * k, m.from[1] + (m.to[1] - m.from[1]) * k]; }
+      st.focus = 1; st.ang = clampAng(st.ang);
+      st.speed = dt > 0 ? Math.hypot(st.ang[0] - before[0], st.ang[1] - before[1]) / (dt / 1000) : 0;
+      return st;
+    }
     if (st.frozen > 0) { st.frozen = Math.max(0, st.frozen - dt); st.vel = [0, 0]; st.speed = 0; return st; }
     if (st.mode === 'turn') {
       const m = st.move;
@@ -236,7 +253,7 @@
   }
 
   const api = { H, AT, M, S, SIZE, TONE, RANGE, TARGETS, STATIC, svg, STATIC_SVG, BALL_SVG, lampSvg, lensSvg, lensRing, lensAt, dirOf, turnTo, clampAng, cursorTurn,
-    FOLLOW, PATROL, TURN, FOCUS, FREEZE, focusAt, create, step, deliberate, freeze, outline, sample, fmt, pathOf };
+    FOLLOW, PATROL, TURN, FOCUS, FREEZE, SAG, focusAt, create, step, deliberate, freeze, sag, outline, sample, fmt, pathOf };
   if (typeof window !== 'undefined') window.ceilingCamera = api;
   if (typeof module !== 'undefined') module.exports = api;
 })();

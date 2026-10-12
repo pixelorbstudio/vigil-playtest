@@ -80,6 +80,19 @@ html.bars, html.bars body { background: var(--bars); }
   transition: transform 80ms linear;
   will-change: transform;
 }
+/* Things that change every frame inside a big layer get layers of their own, so only they are drawn again (the play's live
+   audit, 2026-10-12: with the mouse moving, the ceiling's layer, 3066 x 1728 px, was re-rasterized every frame for the
+   camera's lens, the desk's, 2904 x 1956, for the drawers' own parallax, and the overlay for the glare; the GPU was busy
+   950 ms of every second and the room ran at 36 frames a second at 1920 x 1080). */
+#desk-front, #glare-move { will-change: transform; }
+#ceiling-camera .cam-lens { will-change: transform; }
+.glare { will-change: opacity; }
+/* The LEDs and the keys on layers of their own for good: an LED's flash (every key typed sets some off) started and stopped an
+   animation the compositor runs, and each start or stop re-layered the racks and repainted the big layers that overlap the
+   LEDs; a key going down moved inside the keyboard's layer and repainted all of it. In Pong at 2560 x 1440 the GPU went from
+   255 to 101 ms a second and the worst frame from 72 to 14 ms. */
+.led { will-change: opacity; }
+.key { will-change: transform; }
 
 /* ---------- keys ---------- */
 .key {
@@ -101,6 +114,7 @@ html.bars, html.bars body { background: var(--bars); }
 .led.steady { animation: none; }
 .led.amber { fill: #F2C46B !important; }
 .led.burst { animation: led-burst 320ms steps(1, end) 0s 1; }
+.led.burst.burst2 { animation-name: led-burst2; }     /* (the same flash under a second name: switching restarts it) */
 /* one short, half-deep dip per cycle (it was two dips to a quarter) */
 @keyframes led-blink {
   0%   { opacity: 1; }
@@ -110,6 +124,12 @@ html.bars, html.bars body { background: var(--bars); }
   100% { opacity: 1; }
 }
 @keyframes led-burst {
+  0%   { opacity: .2; }
+  30%  { opacity: 1; }
+  50%  { opacity: .2; }
+  100% { opacity: 1; }
+}
+@keyframes led-burst2 {
   0%   { opacity: .2; }
   30%  { opacity: 1; }
   50%  { opacity: .2; }
@@ -333,7 +353,7 @@ html.cam-hover, html.cam-hover * { cursor: pointer !important; }   /* the ceilin
 
 
 /* a rack dropping packets (LOSS): its LEDs drop out and come back, each on its own beat, as the traffic falls through */
-.led.dropping:not(.down):not(.hot):not(.stuck):not(.rebooting):not(.oom) { animation: led-drop 1.7s steps(1, end) var(--drop, 0s) infinite !important; }
+.led.dropping:not(.down):not(.hot):not(.stuck):not(.rebooting):not(.oom):not(.probed) { animation: led-drop 1.7s steps(1, end) var(--drop, 0s) infinite !important; }
 @keyframes led-drop { 0% { opacity: 1; } 18% { opacity: .08; } 26% { opacity: 1; } 61% { opacity: .08; } 66% { opacity: 1; } }
 
 /* a stuck unit's LED: steady amber */
@@ -343,6 +363,11 @@ html.cam-hover, html.cam-hover * { cursor: pointer !important; }   /* the ceilin
    and every 3 s it dips amber for 0.4 s (swapping). No other kind looks like it. */
 .led.oom { opacity: 1 !important; animation: led-oom 3s linear infinite !important; }
 @keyframes led-oom { 0%, 86.6% { fill: #9FD4A8; } 86.7%, 100% { fill: #F2C46B; } }
+
+/* a unit under probe (INTRUSION, 2026-10-12, build step 9; section 5, "Surface and focus, decided", 8): bursts of three quick
+   amber blinks, then its green, 1.6 s round; a look no other kind has. The strip's PROBED blinks with it (crt.js probed). */
+.led.probed { opacity: 1 !important; animation: led-probed 1.6s linear infinite !important; }
+@keyframes led-probed { 0%, 6.8% { fill: #F2C46B; } 6.9%, 12.4% { fill: #9FD4A8; } 12.5%, 19.3% { fill: #F2C46B; } 19.4%, 24.9% { fill: #9FD4A8; } 25%, 31.8% { fill: #F2C46B; } 31.9%, 100% { fill: #9FD4A8; } }
 
 /* the terminal is drawn on a canvas (crt.js): the text, cursor and status line, bent to the glass */
 #term-canvas { position: absolute; inset: 0; width: 1320px; height: 826px; pointer-events: auto; }

@@ -29,7 +29,13 @@
     pdown: { color: '#ffffff', glow: '#ffffff' }, phot: { color: '#ffd28a' }, pstuck: { color: '#c7b8ff' }, ploss: { color: '#8fd3ff' },
     // OOM pink (2026-10-11: DEFRAG's second file's tint, the one tube tone left that isn't red, green or taken)
     poom: { color: '#f5b3e6' },
+    // INTRUSION (2026-10-12, step 9): PROBED in the phosphor itself, its word blinking in threes as the LED does (probed())
+    pprobed: { color: 'var(--term-text)' },
+    // DEFRAG's 2019 file on night 2: grey, not yours (the cooled silhouette's grey, a little dim)
+    df2019: { color: '#9ea3b8', alpha: .85 },
   };
+  // the LED's bursts of three, as a word's alpha: three quick blinks, then a rest (1.6 s round), for PROBED on the strip
+  const probed = (t = performance.now()) => { const u = t % 1600; return u < 600 && (u % 200) < 110 ? 1 : .35; };
 
   window.createCRT = function ({ canvas, host, warp: warp0 }) {
     // K: canvas pixels a design unit. 2 as the tube is seen from the chair; more while it is seen larger (the start's close-up
@@ -60,8 +66,26 @@
     /* view: { rows: [[{ text, cls }]], cursor: { row, col } | null, cursorOn, status: { energy, beans, low } | null,
        field: a square grid drawn over the text | null (see drawField) } */
     let OFF = TOP;                                       // the work's first row's top (under the pane), this paint
+    // A paint the same as the last is left out (the play's live audit, 2026-10-12: the tube was painted about 35 times a
+    // second, 3.3 ms each, most of them the status line again with the energy a hair lower than the gauge can show). The view
+    // is compared whole, as text, with the energy as the status line draws it: its percentage, and the gauge's fill in whole
+    // canvas pixels (drawStatus snaps it there). Two things in a paint go by the clock, and their state now is part of the
+    // comparison: PROBED's blink on the strip (probed()) and the FIREWALL scope's needle flickering in a jolt.
+    let lastKey = null, cellPx = 0, cellK = 0;
+    const keyOf = (view, pal) => {
+      if (cellK !== K) { f.font = `15px ${FAMILY}`; cellPx = Math.round(f.measureText('M').width * K); cellK = K; }
+      try {
+        const clock = (view.status?.problems?.some(p => p.kind === 'INTRUSION' && !p.fixing) ? probed() : '') + '|' + (view.field?.scope && view.field.state === 'jolt' ? Math.floor(performance.now() / 70) % 2 : '');
+        return K + '|' + pal.text + '|' + pal.dim + '|' + pal.glow + '|' + clock + '|' + JSON.stringify(view, function (k, v) {
+          return k === 'energy' && this === view.status && typeof v === 'number' ? Math.round(v * 100) + ':' + Math.round(Math.max(0, Math.min(1, v)) * 12 * cellPx) : v;
+        });
+      } catch (e) { return null; }
+    };
     function paint(view) {
       const pal = css();
+      const key = keyOf(view, pal);
+      if (key !== null && key === lastKey) return;
+      lastKey = key;
       f.clearRect(0, 0, W, H);
       f.font = `${FONT}px ${FAMILY}`; f.textBaseline = 'middle';
       // burn-in: a prompt left on the tube for years, worn into the phosphor; it shows only with the brightness
@@ -91,7 +115,7 @@
       f.globalAlpha = 1;
       // hair rules between rows (Glenn's log: between his messages), at the top of each listed row, the pane's rule's ink
       if (view.rules) { f.shadowBlur = 0; f.globalAlpha = .3; f.fillStyle = pal.dim; for (const r of view.rules) f.fillRect(PAD_X, Math.round(top + r * LH) - .5, W - 2 * PAD_X, 1); f.globalAlpha = 1; }
-      if (view.field) view.field.pong ? drawPong(view.field, pal) : drawField(view.field, pal);
+      if (view.field) view.field.pong ? drawPong(view.field, pal) : view.field.scope ? drawScope(view.field, pal) : drawField(view.field, pal);
       titleHits = view.title ? drawCloseUp(view.title, pal) : [];
       if (view.cursor && view.cursorOn) {
         const x = PAD_X + view.cursor.col * CW, y = top + view.cursor.row * LH + LH / 2;
@@ -136,16 +160,23 @@
       // LOSS alone left him stuck); short if the strip would run past the tube's edge. A unit in pieces the same way (the
       // cold playtest's dry run, 2026-10-11: STUCK named nothing, and the first one struck at 90 minutes); and out of memory
       // (2026-10-11, step 8: "out of memory: HEAP cart, heap L33")
-      const hint = (p, long) => p.fixing ? '' : p.kind === 'LOSS' ? (long ? `  dropping packets: ROUTE cart, route ${p.unit}` : `  route ${p.unit}`)
+      // (INTRUSION: "probed", its cart and the command, as the others; 2026-10-12, step 9)
+      const hint = (p, long) => p.fixing ? '' : p.kind === 'INTRUSION' ? (long ? `  under probe: FIREWALL cart, firewall ${p.unit}` : `  firewall ${p.unit}`)
+        : p.kind === 'LOSS' ? (long ? `  dropping packets: ROUTE cart, route ${p.unit}` : `  route ${p.unit}`)
         : p.kind === 'STUCK' ? (long ? `  in pieces: DEFRAG cart, defrag ${p.unit}` : `  defrag ${p.unit}`)
         : p.kind === 'OOM' ? (long ? `  out of memory: HEAP cart, heap ${p.unit}` : `  heap ${p.unit}`) : '';
-      const width = long => list.reduce((s, p, i) => s + f.measureText((i ? '  ·  ' : '') + p.unit + ' ' + (p.fixing ? 'FIXING' : p.kind) + hint(p, long)).width, 0);
+      // (what the strip calls each kind: INTRUSION doesn't fit, PROBED does; a unit with its time counting, as R17's on night 2
+      // under the order to leave it down: "R17 DOWN 64m")
+      const word = p => p.kind === 'INTRUSION' ? 'PROBED' : p.kind, count = p => p.count != null && !p.fixing ? ` ${p.count}m` : '';
+      const width = long => list.reduce((s, p, i) => s + f.measureText((i ? '  ·  ' : '') + p.unit + ' ' + (p.fixing ? 'FIXING' : word(p)) + count(p) + hint(p, long)).width, 0);
       const long = width(true) <= W - 2 * PAD_X;
       list.forEach((p, i) => {
         if (i) put('  ·  ', pal.dim);
         put(p.unit + ' ', p.fixing ? pal.dim : pal.text);
-        const st = CLS[{ DOWN: 'pdown', HOT: 'phot', STUCK: 'pstuck', LOSS: 'ploss', OOM: 'poom' }[p.kind]] || {};
-        if (p.fixing) put('FIXING', pal.dim); else { f.shadowColor = st.glow || pal.glow; put(p.kind, st.color || pal.text); f.shadowColor = pal.glow; }
+        const st = CLS[{ DOWN: 'pdown', HOT: 'phot', STUCK: 'pstuck', LOSS: 'ploss', OOM: 'poom', INTRUSION: 'pprobed' }[p.kind]] || {};
+        if (p.fixing) put('FIXING', pal.dim);
+        else { f.shadowColor = st.glow || pal.glow; if (p.kind === 'INTRUSION') f.globalAlpha = probed(); put(word(p), resolve(st.color, pal) || pal.text); f.globalAlpha = 1; f.shadowColor = pal.glow; }
+        if (count(p)) put(count(p), pal.dim);
         if (hint(p, long)) put(hint(p, long), pal.dim);
       });
       // (after the rest, if it fits before the tube's edge)
@@ -268,21 +299,25 @@
       f.beginPath(); f.moveTo(x + 1.5, y - h / 2); f.lineTo(x + 1.5 + w, y); f.lineTo(x + 1.5, y + h / 2); f.closePath(); f.fill();
       f.restore();
     }
+    // (also: a second voice on the link, her silhouette lit beside his, her own nametag under it: aw on night 2, layer 2;
+    // { name, mood }. The text starts after both)
     function drawPane(p, pal) {
-      const x0 = PAD_X + (p.icon ? PANE.ICON * CW : 0), M = MOOD[p.mood] || MOOD.quiet;
+      const x0 = PAD_X + (p.icon ? PANE.ICON * CW * (p.also ? 2 : 1) : 0), M = MOOD[p.mood] || MOOD.quiet;
+      const plate = (x, sz, name, mood) => {
+        // his nametag, once (Arnold, 2026-10-11: the tag is his; on every message it broke the line, so it is a plate under
+        // the square now, as wide as it): inverse red, his name in the glass's blue, in the third row. Grey when he's cooled.
+        const TF = 14, ty = TOP + 2 * LH + LH / 2 - 1, th = TF + 4;
+        f.save(); f.shadowBlur = 0; f.globalAlpha = mood === 'cooled' ? .8 : mood === 'typing' ? 1 : .85;
+        f.fillStyle = mood === 'cooled' ? GREY : '#ff9d9d'; f.fillRect(x, ty - th / 2, sz, th);
+        f.font = `${TF}px ${FAMILY}`; f.textAlign = 'center'; f.textBaseline = 'middle'; f.fillStyle = '#22308f';
+        f.fillText(name, x + sz / 2, ty + .5);
+        f.restore();
+      };
       if (p.icon) {
         const sz = 2 * LH - 6;
         icon(PAD_X, TOP + 3, sz, p.mood);
-        // his nametag, once (Arnold, 2026-10-11: the tag is his; on every message it broke the line, so it is a plate under
-        // the square now, as wide as it): inverse red, his name in the glass's blue, in the third row. Grey when he's cooled.
-        if (p.who?.name) {
-          const TF = 14, ty = TOP + 2 * LH + LH / 2 - 1, th = TF + 4;
-          f.save(); f.shadowBlur = 0; f.globalAlpha = p.mood === 'cooled' ? .8 : p.mood === 'typing' ? 1 : .85;
-          f.fillStyle = p.mood === 'cooled' ? GREY : '#ff9d9d'; f.fillRect(PAD_X, ty - th / 2, sz, th);
-          f.font = `${TF}px ${FAMILY}`; f.textAlign = 'center'; f.textBaseline = 'middle'; f.fillStyle = '#22308f';
-          f.fillText(p.who.name, PAD_X + sz / 2, ty + .5);
-          f.restore();
-        }
+        if (p.who?.name) plate(PAD_X, sz, p.who.name, p.mood);
+        if (p.also) { const x = PAD_X + PANE.ICON * CW; icon(x, TOP + 3, sz, p.also.mood); plate(x, sz, p.also.name, p.also.mood); }
       }
       f.font = `${FONT}px ${FAMILY}`; f.textBaseline = 'middle';
       p.rows.forEach((row, r) => {
@@ -331,6 +366,16 @@
           f.fillRect(cx - r, cy - r, 2 * r, 2 * r); f.restore();
           continue;
         }
+        // FIREWALL (2026-10-12, step 9): a probe, a small hollow diamond; a refusal on its way up, a short bright bar
+        if (kind === 'probe') {
+          const r = step * .3; f.save(); f.strokeStyle = pal.text; f.lineWidth = 2; f.lineJoin = 'round';
+          f.beginPath(); f.moveTo(cx, cy - r); f.lineTo(cx + r, cy); f.lineTo(cx, cy + r); f.lineTo(cx - r, cy); f.closePath(); f.stroke(); f.restore();
+          continue;
+        }
+        if (kind === 'refusal') {
+          const h = step * .62; f.save(); f.fillStyle = '#b8f0c2'; f.shadowColor = '#b8f0c2'; f.fillRect(cx - 1.5, cy - h / 2, 3, h); f.restore();
+          continue;
+        }
         if (kind === 'port' || kind === 'portShut') {    // the core port: a hollow square, lit when it opens
           const side = step - 6; f.save(); f.strokeStyle = kind === 'port' ? '#b8f0c2' : pal.dim; f.globalAlpha = kind === 'port' ? 1 : .6; f.lineWidth = 2;
           f.strokeRect(cx - side / 2, cy - side / 2, side, side); f.restore();
@@ -352,6 +397,33 @@
       f.shadowColor = pal.glow; f.shadowBlur = 6 * K; f.fillStyle = pal.text;
       for (const [x, y, len] of fd.paddles) f.fillRect(x0 + x * CW + 1, y0 + y * R + 2, CW - 2, len * R - 4);
       if (fd.ball) { f.beginPath(); f.arc(x0 + (fd.ball[0] + .5) * CW, y0 + (fd.ball[1] + .5) * R, FONT * .3, 0, Math.PI * 2); f.fill(); }
+    }
+    // POWER's synchroscope (design.md section 5, "The last three cartridges, decided"; built 2026-10-12), drawn where the needle
+    // is, as Pong is, not on the text grid: fd { scope: true, col, row, width, height (the text cells it is centred in),
+    // theta (the needle, degrees clockwise from the top), win (the window's half width, degrees), state }. A ring of dim dots,
+    // a tick over the top, the window at the top in the bright tone, a needle from the centre. state: 'idle' (before the first
+    // key: the needle dim), 'jolt' (a trip: the needle flickering dim), 'closed' (a rack just back: the window lit green).
+    function drawScope(fd, pal) {
+      const cx = PAD_X + (fd.col + fd.width / 2) * CW, cy = OFF + (fd.row + fd.height / 2) * LH;
+      const R = Math.min(fd.width * CW, fd.height * LH) / 2 - 12, rad = d => (d - 90) * Math.PI / 180;
+      const at = (d, r) => [cx + r * Math.cos(rad(d)), cy + r * Math.sin(rad(d))];
+      f.save(); f.lineCap = 'round';
+      // the ring: a dot every 10 degrees, dim, none under the window
+      f.shadowBlur = 0; f.fillStyle = pal.dim; f.globalAlpha = .6;
+      for (let d = 0; d < 360; d += 10) { if (d <= fd.win || d >= 360 - fd.win) continue; const [x, y] = at(d, R); f.beginPath(); f.arc(x, y, 1.6, 0, Math.PI * 2); f.fill(); }
+      // the window: an arc at the ring's radius, and a tick above it
+      const lit = fd.state === 'closed', ink = lit ? '#b8f0c2' : pal.text;
+      f.globalAlpha = 1; f.strokeStyle = ink; f.shadowColor = lit ? '#b8f0c2' : pal.glow; f.shadowBlur = (lit ? 10 : 6) * K;
+      f.lineWidth = 3; f.beginPath(); f.arc(cx, cy, R, rad(-fd.win), rad(fd.win)); f.stroke();
+      f.lineWidth = 2; f.beginPath(); f.moveTo(cx, cy - R - 4); f.lineTo(cx, cy - R - 10); f.stroke();
+      // the needle and its hub
+      const jolt = fd.state === 'jolt', idle = fd.state === 'idle';
+      f.globalAlpha = idle ? .45 : jolt ? (Math.floor(performance.now() / 70) % 2 ? .25 : .6) : 1;
+      f.strokeStyle = f.fillStyle = pal.text; f.shadowColor = pal.glow; f.shadowBlur = idle ? 0 : 6 * K;
+      const [nx, ny] = at(fd.theta, R - 8);
+      f.lineWidth = 2.5; f.beginPath(); f.moveTo(cx, cy); f.lineTo(nx, ny); f.stroke();
+      f.beginPath(); f.arc(cx, cy, 3.5, 0, Math.PI * 2); f.fill();
+      f.restore();
     }
     // The start's close-up (Arnold, 2026-10-11; docs/proposals/start-camera-and-eyelids-2026-10-11.md): the tube filling the
     // window, its glass dark, in the fall-asleep screen's lettering (#night-over: 30 px at the frame's 1080, #cfd6ff, a 10 px
@@ -425,12 +497,102 @@
     // paint, which made the close-up's hover lag (the final sweep's live audit, 2026-10-11). The bend's slope is at most
     // about 0.15, so a strip's ends are within 0.1 design unit of the curve.
     function bend() {
+      if (bendMode !== '2d' && gl.ready() && gl.fits()) { gl.draw(); out.clearRect(0, 0, canvas.width, canvas.height); out.drawImage(gl.canvas, 0, 0); return; }
+      bend2d();
+    }
+    function bend2d() {
       const st = Math.max(1, Math.floor(K / 2)), W2 = flat.width, H2 = mid.height;
       m.clearRect(0, 0, mid.width, mid.height);
       for (let x = 0; x < W2; x += st) { const w = Math.min(st, W2 - x), c = Math.min(W2 - 1, x + (w >> 1)); m.drawImage(flat, x, 0, w, flat.height, x, warp.top[c], w, flat.height + warp.bottom[c] - warp.top[c]); }
       out.clearRect(0, 0, canvas.width, canvas.height);
       for (let y = 0; y < H2; y += st) { const h = Math.min(st, H2 - y), c = Math.min(H2 - 1, y + (h >> 1)); out.drawImage(mid, 0, y, mid.width, h, warp.left[c], y, mid.width + warp.right[c] - warp.left[c], h); }
     }
-    return { paint, layout, COLS, ROWS, CW, LH, TOP, PAD_X, PANE, W, H, mailHit: () => mailHit, titleHit: () => titleHits, setK, get K() { return K; } };
+    // The same bend in one WebGL draw (the play's live audit, 2026-10-12): the strips above are 2,146 draws a paint at the
+    // chair, 3 ms of the page's time and most of the GPU's while the tube moves every frame (Pong and the other games, the
+    // typing). The shader does the same two passes for each pixel of the tube: the row's strip stretched to its curved sides
+    // (its left and right from the tables, the pixel's share of the strip's span as its coverage), between the two columns
+    // either side, each of them that column's strip stretched to its curved top and bottom (the same, upright), sampled from
+    // the flat text with the same smoothing; the strips are the same strips (K/2 pixels, placed by the bend at their middle).
+    // The text, the tables and the strips are the 2D path's; the difference is that the column pass isn't rounded to
+    // 8 bits before the row pass reads it (a level or so here and there). Without WebGL2, or with its context lost, the 2D
+    // strips draw it as before. bendMode '2d' (the audit's) draws with the strips.
+    let bendMode = 'gl';
+    const gl = (() => {
+      let c = null, g = null, prog = null, flatTex = null, warpTex = null, warpFor = null, sizeFor = '', failed = false, why = '';
+      const VS = '#version 300 es\nin vec2 p; void main() { gl_Position = vec4(p, 0.0, 1.0); }';
+      const FS = `#version 300 es
+precision highp float; precision highp int;
+uniform sampler2D src; uniform highp sampler2D warp; uniform int W2; uniform int H2; uniform int st;
+out vec4 o;
+float cover(float a, float lo, float hi) { return clamp(min(a + 1.0, hi) - max(a, lo), 0.0, 1.0); }
+// the column strip c's colour at row py (the column pass)
+vec4 col(int c, float py) {
+  int xs = (c / st) * st, w = min(st, W2 - xs), cc = min(W2 - 1, xs + (w >> 1));
+  float T = texelFetch(warp, ivec2(cc, 0), 0).r, B = texelFetch(warp, ivec2(cc, 1), 0).r, h = float(H2);
+  float sy = (h + B - T) / h;
+  float v = (py + 0.5 - T) / sy;
+  return cover(py, T, T + h * sy) * texture(src, vec2((float(c) + 0.5) / float(W2), v / h));
+}
+void main() {
+  int px = int(gl_FragCoord.x), pyi = H2 - 1 - int(gl_FragCoord.y);
+  float x = float(px), py = float(pyi), w = float(W2);
+  int ys = (pyi / st) * st, hh = min(st, H2 - ys), cr = min(H2 - 1, ys + (hh >> 1));
+  float L = texelFetch(warp, ivec2(cr, 2), 0).r, R = texelFetch(warp, ivec2(cr, 3), 0).r;
+  float sx = (w + R - L) / w;
+  float u = (x + 0.5 - L) / sx - 0.5, c0 = floor(u), fx = u - c0;
+  int a = clamp(int(c0), 0, W2 - 1), b = clamp(int(c0) + 1, 0, W2 - 1);
+  o = cover(x, L, L + w * sx) * mix(col(a, py), col(b, py), fx);
+}`;
+      function init() {
+        try {
+          c = document.createElement('canvas');
+          g = c.getContext('webgl2', { premultipliedAlpha: true, preserveDrawingBuffer: true, antialias: false, alpha: true });
+          if (!g) throw new Error('no webgl2');
+          const sh = (t, s) => { const x = g.createShader(t); g.shaderSource(x, s); g.compileShader(x); if (!g.getShaderParameter(x, g.COMPILE_STATUS)) throw new Error(g.getShaderInfoLog(x)); return x; };
+          prog = g.createProgram(); g.attachShader(prog, sh(g.VERTEX_SHADER, VS)); g.attachShader(prog, sh(g.FRAGMENT_SHADER, FS)); g.linkProgram(prog);
+          if (!g.getProgramParameter(prog, g.LINK_STATUS)) throw new Error(g.getProgramInfoLog(prog));
+          g.useProgram(prog);
+          const buf = g.createBuffer(); g.bindBuffer(g.ARRAY_BUFFER, buf); g.bufferData(g.ARRAY_BUFFER, new Float32Array([-1, -1, 3, -1, -1, 3]), g.STATIC_DRAW);
+          const loc = g.getAttribLocation(prog, 'p'); g.enableVertexAttribArray(loc); g.vertexAttribPointer(loc, 2, g.FLOAT, false, 0, 0);
+          flatTex = g.createTexture(); g.activeTexture(g.TEXTURE0); g.bindTexture(g.TEXTURE_2D, flatTex);
+          for (const [k, v] of [[g.TEXTURE_MIN_FILTER, g.LINEAR], [g.TEXTURE_MAG_FILTER, g.LINEAR], [g.TEXTURE_WRAP_S, g.CLAMP_TO_EDGE], [g.TEXTURE_WRAP_T, g.CLAMP_TO_EDGE]]) g.texParameteri(g.TEXTURE_2D, k, v);
+          warpTex = g.createTexture(); g.activeTexture(g.TEXTURE1); g.bindTexture(g.TEXTURE_2D, warpTex);
+          for (const [k, v] of [[g.TEXTURE_MIN_FILTER, g.NEAREST], [g.TEXTURE_MAG_FILTER, g.NEAREST], [g.TEXTURE_WRAP_S, g.CLAMP_TO_EDGE], [g.TEXTURE_WRAP_T, g.CLAMP_TO_EDGE]]) g.texParameteri(g.TEXTURE_2D, k, v);
+          g.uniform1i(g.getUniformLocation(prog, 'src'), 0); g.uniform1i(g.getUniformLocation(prog, 'warp'), 1);
+          c.addEventListener('webglcontextlost', e => { e.preventDefault(); failed = true; });
+        } catch (e) { failed = true; why = String(e && e.message || e); }
+      }
+      return {
+        get canvas() { return c; }, get why() { return why; },
+        ready() { if (!g && !failed) init(); return !failed && g && !g.isContextLost(); },
+        // (a size WebGL can hold: its drawing buffer is quietly made smaller than asked past its limit, which scaled the close-up
+        // at K 12, and the tables' texture is as wide as the longer side; past either, the strips draw it)
+        fits() {
+          const W2 = flat.width, H2 = flat.height;
+          if (sizeFor !== W2 + 'x' + H2) { c.width = W2; c.height = H2; g.viewport(0, 0, W2, H2); sizeFor = W2 + 'x' + H2; warpFor = null; }
+          return g.drawingBufferWidth === W2 && g.drawingBufferHeight === H2 && Math.max(W2, H2) <= g.getParameter(g.MAX_TEXTURE_SIZE);
+        },
+        draw() {
+          const W2 = flat.width, H2 = flat.height;
+          if (warpFor !== warp) {
+            // the four tables as the rows of one float texture: top and bottom by column, left and right by row
+            const n = Math.max(W2, H2), d = new Float32Array(n * 4);
+            for (let i = 0; i < W2; i++) { d[i] = warp.top[i]; d[n + i] = warp.bottom[i]; }
+            for (let i = 0; i < H2; i++) { d[2 * n + i] = warp.left[i]; d[3 * n + i] = warp.right[i]; }
+            g.activeTexture(g.TEXTURE1); g.texImage2D(g.TEXTURE_2D, 0, g.R32F, n, 4, 0, g.RED, g.FLOAT, d);
+            warpFor = warp;
+          }
+          g.activeTexture(g.TEXTURE0);
+          g.pixelStorei(g.UNPACK_PREMULTIPLY_ALPHA_WEBGL, true);
+          g.texImage2D(g.TEXTURE_2D, 0, g.RGBA, g.RGBA, g.UNSIGNED_BYTE, flat);
+          g.uniform1i(g.getUniformLocation(prog, 'W2'), W2); g.uniform1i(g.getUniformLocation(prog, 'H2'), H2); g.uniform1i(g.getUniformLocation(prog, 'st'), Math.max(1, Math.floor(K / 2)));
+          g.clearColor(0, 0, 0, 0); g.clear(g.COLOR_BUFFER_BIT);
+          g.drawArrays(g.TRIANGLES, 0, 3);
+        },
+      };
+    })();
+    // (for the audit: draw the last view again with the strips or with WebGL, and read the tube's pixels)
+    const bendAudit = { set: m => { bendMode = m; lastKey = null; }, get mode() { return bendMode; }, gl: () => gl.ready() || gl.why };
+    return { paint, layout, COLS, ROWS, CW, LH, TOP, PAD_X, PANE, W, H, mailHit: () => mailHit, titleHit: () => titleHits, setK, get K() { return K; }, bendAudit };
   };
 })();

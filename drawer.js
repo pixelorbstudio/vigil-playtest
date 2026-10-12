@@ -439,15 +439,19 @@
     // the straps (strap.js): the steel plate, the slot and the divot's mouth on the case's top; the webbing and the latch
     // plate over their cartridge, just after it. Each side of the apron drawn on its own.
     // (drawn exactly when still, and kept; while the drawer slides or a strap moves, state.fast or the strap's own fast
-    // draws it from coarser samples, under 0.05 px from the exact)
+    // draws it from coarser samples, under 0.05 px from the exact). state.exactBudget (the page's): at most that many exact
+    // drawings in one render, the rest coarse until a later one (pendingExact): the twelve at once, as the drawer stopped,
+    // were a 140 ms frame (the play's live audit, 2026-10-12)
     const strapJoints = [];
+    let budget = state.exactBudget ?? Infinity, pendingExact = false;
     if (state.straps && window.strapA) for (const slot of Object.keys(state.straps)) {
       if (!PLACES[+slot]) continue;
       const r = recessAt(+slot, D), st = state.straps[slot], fast = !!(state.fast || st.fast);
       for (const side of [-1, 1]) {
         const key = [slot, side, D.toFixed(7), st.t, st.tug || 0, r.uc].join('|');
         let o = fast ? null : STRAPS.get(key);
-        if (!o) { o = window.strapA.draw({ P, r, rest: recessAt(+slot, TRAVEL), side, t: st.t, tug: st.tug || 0, fast }); if (!fast) { if (STRAPS.size > 64) STRAPS.clear(); STRAPS.set(key, o); } }
+        const coarse = fast || (!o && budget <= 0);
+        if (!o) { o = window.strapA.draw({ P, r, rest: recessAt(+slot, TRAVEL), side, t: st.t, tug: st.tug || 0, fast: coarse }); if (!coarse) { budget--; if (STRAPS.size > 64) STRAPS.clear(); STRAPS.set(key, o); } else if (!fast) pendingExact = true; }
         const to = side < 0 ? inner : outer;
         strapJoints.push({ slot: +slot, t: st.t, joints: o.joints });
         if (o.case) to.push([CASE, 0.5 + slot * 1e-3, o.case]);
@@ -485,7 +489,7 @@
     return {
       inner: order(inner), outer: order(outer), front: front.join(''),
       hole: pts(state.tanker ? roundUV(0, 1, 0, 1, R_DRAWER, 0) : sampled([[0, 0, 0], [1, 0, 0], [1, 1, 0], [0, 1, 0]])),
-      hits, frontHit: pts(sampled(plate.front)), strapJoints,
+      hits, frontHit: pts(sampled(plate.front)), strapJoints, pendingExact,
     };
   }
 

@@ -22,8 +22,12 @@
 
   function lathe(profile, { C, A, U, V }, project, mats, { width = 1, sectors = 360, cut = null, genStep = 8, matEdges = false, open = [], noGenerators = [], split = true, seal = false } = {}) {
     const N = sectors;
-    const pt = (h, r, i) => { const a = 2 * Math.PI * i / N, c = Math.cos(a) * r, s = Math.sin(a) * r; return [C[0] + A[0] * h + U[0] * c + V[0] * s, C[1] + A[1] * h + U[1] * c + V[1] * s, C[2] + A[2] * h + U[2] * c + V[2] * s]; };
-    const radial = i => { const a = 2 * Math.PI * (i + .5) / N; return norm([U[0] * Math.cos(a) + V[0] * Math.sin(a), U[1] * Math.cos(a) + V[1] * Math.sin(a), U[2] * Math.cos(a) + V[2] * Math.sin(a)]); };
+    // (each sector's cosine and sine, and its radial normal, worked out once: the same numbers as computing them at every point,
+    // and the canister, drawn every frame as it comes down the tube, no longer took 40 to 80 ms a frame; the play's live audit, 2026-10-12)
+    const COS = Array.from({ length: N + 1 }, (_, i) => Math.cos(2 * Math.PI * i / N)), SIN = Array.from({ length: N + 1 }, (_, i) => Math.sin(2 * Math.PI * i / N));
+    const pt = (h, r, i) => { const c = (i >= 0 && i <= N && i === (i | 0) ? COS[i] : Math.cos(2 * Math.PI * i / N)) * r, s = (i >= 0 && i <= N && i === (i | 0) ? SIN[i] : Math.sin(2 * Math.PI * i / N)) * r; return [C[0] + A[0] * h + U[0] * c + V[0] * s, C[1] + A[1] * h + U[1] * c + V[1] * s, C[2] + A[2] * h + U[2] * c + V[2] * s]; };
+    const RADIAL = Array.from({ length: N }, (_, i) => { const a = 2 * Math.PI * (i + .5) / N; return norm([U[0] * Math.cos(a) + V[0] * Math.sin(a), U[1] * Math.cos(a) + V[1] * Math.sin(a), U[2] * Math.cos(a) + V[2] * Math.sin(a)]); });
+    const radial = i => RADIAL[i];
     const Au = norm(A);
     const inCut = i => cut && (cut.i0 <= cut.i1 ? i >= cut.i0 && i < cut.i1 : i >= cut.i0 || i < cut.i1);
     const rings = profile.map(([h, r]) => Array.from({ length: N + 1 }, (_, i) => pt(h, r, i)));

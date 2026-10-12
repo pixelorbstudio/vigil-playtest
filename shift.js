@@ -8,6 +8,8 @@
      STUCK fragmented, LED steady amber.   A reboot won't hold; only the DEFRAG cartridge fixes it.
      LOSS  a whole rack dropping packets.  Only the ROUTE cartridge fixes it.
      OOM   out of memory, stalled.         Only the HEAP cartridge fixes it (from shift 2).
+     INTRUSION probed, bursts of amber.    Only the FIREWALL cartridge fixes it (night 2). It waits as HOT does: no strike
+                                           clock; left an hour, the remote session shuts it down and it is DOWN.
    Difficulty is earned, not scheduled (Eugene's playtest, 2026-10-02; design.md, "The player is always in control"):
    the kinds of trouble arrive by mastery, one at a time (DOWN, then HOT after clean DOWN fixes, then STUCK once DEFRAG
    is in the drawer, then LOSS once ROUTE is), each first one alone until it is fixed; and the pace follows the player
@@ -42,7 +44,7 @@
      usual around it; it stays open, the first of its kind, for its own teaching game, and a lesson due meanwhile waits for
      the board to clear as before. */
   const GRACE = { stand: 8 };
-  const MASTERY = { order: ['DOWN', 'HOT', 'STUCK', 'LOSS', 'OOM'], needs: { STUCK: 'DEFRAG', LOSS: 'ROUTE', OOM: 'HEAP' }, need: [3, 1, 1], kindNeed: { LOSS: 1, OOM: 1 }, after: 10 };
+  const MASTERY = { order: ['DOWN', 'HOT', 'STUCK', 'LOSS', 'OOM', 'INTRUSION'], needs: { STUCK: 'DEFRAG', LOSS: 'ROUTE', OOM: 'HEAP', INTRUSION: 'FIREWALL' }, need: [3, 1, 1], kindNeed: { LOSS: 1, OOM: 1, INTRUSION: 1 }, after: 10 };
   /* The pace follows the player (flow): a quick clean fix (inside `quick` shift minutes of the alert, about 80 real
      seconds) brings the next trouble a little sooner, a clean but slow one leaves the pace where it is, and a strike,
      an escalation or a lost game eases it off. Each problem left open stretches the gap by `open`. The gap is `base` to
@@ -74,13 +76,21 @@
   // win reveals the night's first); failing that, from an hour after the last one turned up, half an hour of calm
   // racks brings it (the slow path), and at an hour and a half it comes on a timer, so nobody is left without it.
   // (2026-10-11: FIREWALL is Glenn's gift, not the chain's: section 5, "The unlocks tell the story, decided")
-  const ORDER = ['PONG', 'DEFRAG', 'ROUTE', 'HEAP', 'POWER'];
+  // (2026-10-12, step 9: FIREWALL is night 2's, handed over by Glenn himself in his pane; the page says so, not Vigil's mail)
+  const ORDER = ['PONG', 'DEFRAG', 'ROUTE', 'HEAP', 'FIREWALL', 'POWER'];
   // first: when the first trouble comes (shift minutes; QUIET otherwise). quiet: windows with no new trouble, held
   // for the story (decided 2026-09-30: a drip, with quiet around story moments): 04:44 and the minute before it.
   // Night 1 starts at 23:10 (Arnold, 2026-09-30: the first five real minutes were 60-100% idle).
   const NIGHTS = [
     { start: ['PONG'], chain: ['DEFRAG', 'ROUTE'], first: 10, lesson: 10, quiet: [[318, 352]], deliveries: { streaks: true, bag: true } },
-    { start: ['PONG', 'DEFRAG', 'ROUTE', 'HEAP'], chain: [], quiet: [[318, 352]], deliveries: { streaks: true, bag: true } },          // FIREWALL when built (its empty canister cut: Arnold, 2026-10-06)
+    // night 2 (shift 3; 2026-10-12, build step 9): its first trouble at 23:10, as night 1's, the gift down the tube in the
+    // minutes before it (section 5, the simulation report's planned fixes: night 2's first beat in its first minute or two).
+    // FIREWALL is its one new cartridge, Glenn's gift (section 5, "The unlocks tell
+    // the story, decided"), handed over when the chain would hand one over (section 5, "The last three cartridges, decided"):
+    // the night's first cartridge win of any kind (anyWin), else thirty calm minutes from 00:00, else 00:30 on a timer. Its
+    // first INTRUSION is its teaching game, 10 shift minutes after the hand-over, alone (lesson, for INTRUSION only: the
+    // night's other kinds come as before). (Its empty canister cut: Arnold, 2026-10-06.)
+    { start: ['PONG', 'DEFRAG', 'ROUTE', 'HEAP'], chain: ['FIREWALL'], anyWin: true, first: 10, lesson: 10, lessonKinds: ['INTRUSION'], quiet: [[318, 352]], deliveries: { streaks: true, bag: true } },
     // night 3 starts mid-crisis (decided 2026-09-30): the night never ended, so you log in tired (energy 45%; 60% since
     // Arnold, 2026-10-06: energy carries over between nights but a night never starts under 60%) to a unit
     // down, one stuck and a rack dropping packets, all just broken (2026-10-02, the player always in control: they used
@@ -103,9 +113,12 @@
   // by ROUTE. The rest is DOWN and HOT, the filler between games.
   // OOM (a unit out of memory) by HEAP, from shift 2 (2026-10-11): once it has joined the night, STUCK, LOSS and OOM are
   // about 15% each, so cartridge trouble stays under half (section 5, "The last three cartridges, decided")
-  const TROUBLE = { STUCK: { cart: 'DEFRAG', share: .22 }, LOSS: { cart: 'ROUTE', share: .22 }, OOM: { cart: 'HEAP', share: .15 } };
-  const SHARE_WITH_OOM = .15;
-  const CART_KINDS = { STUCK: 'defrag', LOSS: 'route', OOM: 'heap' };   // cartridge trouble, by its fix's verb
+  // INTRUSION by FIREWALL, from shift 3 (2026-10-12, step 9): once it has joined, INTRUSION 12% and the other three 13% each
+  const TROUBLE = { STUCK: { cart: 'DEFRAG', share: .22 }, LOSS: { cart: 'ROUTE', share: .22 }, OOM: { cart: 'HEAP', share: .15 }, INTRUSION: { cart: 'FIREWALL', share: .12 } };
+  const SHARE_WITH_OOM = .15, SHARE_WITH_INTRUSION = .13;
+  const CART_KINDS = { STUCK: 'defrag', LOSS: 'route', OOM: 'heap', INTRUSION: 'firewall' };   // cartridge trouble, by its fix's verb
+  // INTRUSION waits as HOT does: no strike clock; left this many shift minutes it is shut down by the remote session, DOWN
+  const INTRUDE = 60;
   const FIRST_AFTER = 30;                           // a cartridge you start the night with counts as found this long ago
   const DIAL_FROM = 90;                             // DEFRAG's dial starts turning at 00:30
   // (play is spent while the game runs, over its minute, not at its start: the bar visibly ticks down faster while you
@@ -285,7 +298,7 @@
         if (teaching) continue;
         if (inc.downSince !== null && !inc.fixing && !s.over && !(inc.coolUntil > s.t)) {
           inc.idle += dt;
-          if (inc.idle >= STRIKE.after + inc.struck * STRIKE.again) {
+          if (inc.idle >= (inc.strikeAfter ?? STRIKE.after) + inc.struck * STRIKE.again) {
             inc.struck++; s.strikes++; s.streak = 0; ease();
             events.push({ type: 'strike', unit, kind: inc.kind, n: s.strikes, min: Math.round(s.t - inc.downSince) });
             if (s.strikes >= STRIKE.max) end('relieved', events, 'strikes');
@@ -294,6 +307,11 @@
         if (inc.kind === 'HOT' && !inc.fixing && s.t - inc.since >= L.hot) {
           inc.kind = 'DOWN'; inc.since = s.t; inc.downSince = s.t; inc.slow = true; s.stats.escalated++; ease();
           events.push({ type: 'escalate', unit });
+        }
+        // probed an hour with nobody on it: the remote session shuts it down, and it is DOWN (its strike clock from now)
+        if (inc.kind === 'INTRUSION' && !inc.fixing && s.t - inc.since >= INTRUDE) {
+          inc.kind = 'DOWN'; inc.since = s.t; inc.downSince = s.t; inc.slow = true; s.stats.escalated++; ease();
+          events.push({ type: 'escalate', unit, from: 'INTRUSION' });
         }
       }
       // held for the story: the night's quiet windows, and while the page says so (Glenn typing)
@@ -305,13 +323,13 @@
       // night 1's lessons: the first STUCK or LOSS, `lesson` minutes after its cartridge's hand-over, whatever the gate says.
       // Once one is due nothing else new starts, so the board clears for it (a slow player's is rarely clear by itself)
       const lesson = NIGHT.lesson != null && s.stats.incidents > 0 && s.t < SPAN
-        && MASTERY.order.find(k => MASTERY.needs[k] && !s.seen.has(k) && s.handed.has(MASTERY.needs[k]) && s.t >= s.handed.get(MASTERY.needs[k]) + NIGHT.lesson);
+        && MASTERY.order.find(k => MASTERY.needs[k] && (!NIGHT.lessonKinds || NIGHT.lessonKinds.includes(k)) && !s.seen.has(k) && s.handed.has(MASTERY.needs[k]) && s.t >= s.handed.get(MASTERY.needs[k]) + NIGHT.lesson);
       // (a first of a kind outstaying its grace doesn't hold the night for a lesson behind it: the night goes on, below)
       if (lesson && !outstayed()) {
         if (!s.open.size && !hushed) {
           const pool = lesson === 'LOSS' ? racks : units, unit = pool[Math.floor(rand() * pool.length)];
           s.seen.add(lesson);
-          s.open.set(unit, { kind: lesson, since: s.t, downSince: s.t, fixing: false, idle: 0, struck: 0, first: true, lesson: true });
+          s.open.set(unit, { kind: lesson, since: s.t, downSince: lesson === 'INTRUSION' ? null : s.t, fixing: false, idle: 0, struck: 0, first: true, lesson: true });
           s.stats.incidents++;
           events.push({ type: 'incident', unit, kind: lesson, first: true, lesson: true });
         }
@@ -324,7 +342,7 @@
         const fresh = around ? null : MASTERY.order.find(k => s.kinds.has(k) && !s.seen.has(k));
         const carts = around ? [] : Object.keys(TROUBLE).filter(k => s.kinds.has(k));
         let kind = fresh;
-        const share = k => s.kinds.has('OOM') ? SHARE_WITH_OOM : TROUBLE[k].share;
+        const share = k => s.kinds.has('INTRUSION') ? (k === 'INTRUSION' ? TROUBLE.INTRUSION.share : SHARE_WITH_INTRUSION) : s.kinds.has('OOM') ? SHARE_WITH_OOM : TROUBLE[k].share;
         if (!kind) { let r = rand(); for (const k of carts) { if (r < share(k)) { kind = k; break; } r -= share(k); } }
         const filler = () => s.kinds.has('HOT') && (!around || s.seen.has('HOT')) && rand() < .55 ? 'HOT' : 'DOWN';
         if (!kind) kind = filler();
@@ -336,7 +354,7 @@
         if (room && free.length && s.t < SPAN) {
           const unit = free[Math.floor(rand() * free.length)];
           s.seen.add(kind);
-          s.open.set(unit, { kind, since: s.t, downSince: kind === 'HOT' ? null : s.t, fixing: false, idle: 0, struck: 0, first: alone });
+          s.open.set(unit, { kind, since: s.t, downSince: kind === 'HOT' || kind === 'INTRUSION' ? null : s.t, fixing: false, idle: 0, struck: 0, first: alone });
           s.stats.incidents++;
           events.push({ type: 'incident', unit, kind, first: alone });
         } else if (alone) s.nextAt = s.t + .5;      // a first one waits for a clear board, then comes promptly
@@ -388,7 +406,8 @@
       if (s.won.has(cart) || s.over) return events;
       s.won.add(cart);
       // the next in the story's order that this night hands over (Pong's win: the night's first)
-      const next = cart === 'PONG' ? NIGHT.chain[0] : ORDER[ORDER.indexOf(cart) + 1];
+      // (night 2: the night's first cartridge win of any kind hands its one over: anyWin)
+      const next = NIGHT.anyWin ? NIGHT.chain.find(c => !s.found.has(c)) : cart === 'PONG' ? NIGHT.chain[0] : ORDER[ORDER.indexOf(cart) + 1];
       if (next && NIGHT.chain.includes(next) && !s.found.has(next)) reveal(next, 'won', events);
       return events;
     }
@@ -411,16 +430,17 @@
     function poke() { s.idle = 0; }
 
     // starting a fix: the verb has to match the trouble, and it costs energy. The fix completes with finish(unit).
-    function fix(unit, verb) {
+    // (free: someone else's keys (aw's batch, night 2): the fix starts, and its effort isn't yours)
+    function fix(unit, verb, free = false) {
       const inc = s.open.get(unit);
       if (!inc) return { ok: false, reason: 'nothing wrong' };
       if (inc.fixing) return { ok: false, reason: 'already being fixed' };
       const need = { DOWN: 'reboot', HOT: 'reroute', ...CART_KINDS }[inc.kind];
-      if (verb !== need) return { ok: false, reason: { DOWN: 'not responding', HOT: 'running hot', STUCK: 'fragmented', LOSS: 'dropping packets', OOM: 'out of memory' }[inc.kind], need };
+      if (verb !== need) return { ok: false, reason: { DOWN: 'not responding', HOT: 'running hot', STUCK: 'fragmented', LOSS: 'dropping packets', OOM: 'out of memory', INTRUSION: 'under probe' }[inc.kind], need };
       if (inc.coolUntil > s.t) return { ok: false, reason: 'cooling', waitMs: (inc.coolUntil - s.t) / perMs };
       inc.fixing = true; s.idle = 0;
       if (Object.values(CART_KINDS).includes(verb)) s.playing.set(unit, CART.play);     // (spent as the game runs)
-      else s.energy = Math.max(0, s.energy - ENERGY.cost[verb]);
+      else if (!free) s.energy = Math.max(0, s.energy - ENERGY.cost[verb]);
       return { ok: true, kind: inc.kind };
     }
     // a cartridge game lost: the unit stays as it was, and it costs you
@@ -451,6 +471,15 @@
       const [, start, holes, target, fall, grow] = HEAP_DIAL.filter(([at]) => t >= at).pop();
       return { start, holes, target, fall, grow };
     }
+    // how hard FIREWALL plays at this hour (firewall-audit.js; section 5, "The last three cartridges, decided", made longer
+    // by Arnold: a bigger, slower block): after the night's first (teaching) game, 24 probes (four rows of six), a step every
+    // 600 ms; 02:00 28 (four of seven), 590 ms; 04:00 28, 540 ms; shift 4 late 32 (four of eight), 590 ms. The night's first
+    // game is the page's to make easy (teach: two rows of eight, 800 ms).
+    function firewallDial() {
+      const t = s.t + L.dial.ahead;
+      if (LEVELS.indexOf(L) === 2 && t >= 300) return { rows: 4, per: 8, march: 590 };
+      return t >= 300 ? { rows: 4, per: 7, march: 540 } : t >= 180 ? { rows: 4, per: 7, march: 590 } : { rows: 4, per: 6, march: 600 };
+    }
     // how hard ROUTE plays at this hour (route-audit.js): more hops, more dead links, a faster train; night 3 more so.
     // The night's first game is the page's to make easy (teach).
     function routeDial() {
@@ -459,10 +488,13 @@
       return { hops: Math.round(6 + 3 * u) + late, dead: Math.round(2 + 6 * u) + 2 * late, tick: Math.round(160 - 30 * u) - 5 * late };
     }
     // a fix lands: a reboot or reroute pays a little back, a cartridge win (a stuck unit freed) is a second wind
-    function finish(unit) {
+    // theirs: a fix someone else typed on your keys (aw's, night 2): the unit is back, and nothing of it is yours: no refund,
+    // no streak, no pace, no mastery (2026-10-12, step 9; the story audit's fix 2: off your streak, as off your merit)
+    function finish(unit, theirs = false) {
       settle(unit);
       const inc = s.open.get(unit);
       if (!inc) return;
+      if (theirs) { endOutage(unit, inc); s.open.delete(unit); s.stats.fixed++; s.lastQuick = false; if (inc.first) s.nextAt = Math.max(s.nextAt, s.t + gap()); return false; }
       s.energy = Math.min(1, s.energy + (CART_KINDS[inc.kind] ? CART.win : ENERGY.refund[inc.kind] || 0));
       endOutage(unit, inc);
       s.open.delete(unit);
@@ -503,9 +535,10 @@
     // a dimmer screen is easier on the eyes: the page sets this from the brightness knob
     function setStrain(k) { s.strain = k; }
     // for trying things out (?dev in the page): make trouble now, or hand over a cartridge
-    function inject(unit, kind) {
+    // (opts.strikeAfter: shift minutes before its first strike, if not STRIKE.after: night 2's R17, the order to leave it down)
+    function inject(unit, kind, opts = {}) {
       if (s.open.has(unit) || s.over) return null;
-      s.open.set(unit, { kind, since: s.t, downSince: kind === 'HOT' ? null : s.t, fixing: false, idle: 0, struck: 0 });
+      s.open.set(unit, { kind, since: s.t, downSince: kind === 'HOT' || kind === 'INTRUSION' ? null : s.t, fixing: false, idle: 0, struck: 0, ...(opts.strikeAfter ? { strikeAfter: opts.strikeAfter } : {}) });
       s.seen.add(kind); s.kinds.add(kind);
       s.stats.incidents++;
       return { type: 'incident', unit, kind };
@@ -533,8 +566,11 @@
       hush: realMs => { s.hushUntil = Math.max(s.hushUntil, s.t + realMs * perMs); },
       // no new trouble at all while on (a protected Pong match); what is open still counts toward its strikes
       protect: on => { s.protect = !!on; },
+      // POWER (2026-10-12, built on its own: no unit's trouble behind it): its play cost spent as it runs, as a unit's game's
+      // is (playing), and what is left of it spent when it ends (settle); its win and loss are the page's (paidBack, spend)
+      play: key => { s.playing.set(key, CART.play); s.idle = 0; }, settle,
       get lastQuick() { return !!s.lastQuick; },
-      tick, fix, finish, failed, hold, won, offer, heapDial, handOver, poke, rest, paidBack, drainFactor, defragDial, routeDial, drink, spend, setStrain, useBean, addBeans, inject, find, clock, uptime, report,
+      tick, fix, finish, failed, hold, won, offer, heapDial, firewallDial, handOver, poke, rest, paidBack, drainFactor, defragDial, routeDial, drink, spend, setStrain, useBean, addBeans, inject, find, clock, uptime, report,
       get t() { return s.t; }, get over() { return s.over; }, get ending() { return s.ending; },
       get strikes() { return s.strikes; }, get energy() { return s.energy; }, get beans() { return s.beans; }, get playing() { return s.playing.size > 0; },
       get flow() { return s.flow; }, get offered() { return OFFER ? OFFER.cart : null; }, get kinds() { return [...s.kinds]; }, get held() { return [...s.holds]; }, MASTERY, FLOW, GRACE,
@@ -545,8 +581,8 @@
       // cooling: real ms until a lost game can be played again (0: it can)
       cooling: unit => { const inc = s.open.get(unit); return inc && inc.coolUntil > s.t ? (inc.coolUntil - s.t) / perMs : 0; },
       open: () => [...s.open.entries()].map(([unit, inc]) => ({ unit, ...inc, forMin: s.t - inc.since,
-        toStrike: inc.downSince === null || inc.fixing ? null : STRIKE.after + inc.struck * STRIKE.again - inc.idle })),
-      CART, PONG_BREAK: ENERGY.pong, SPAN, STRIKE, level: LEVELS.indexOf(L) + 1,
+        toStrike: inc.downSince === null || inc.fixing ? null : (inc.strikeAfter ?? STRIKE.after) + inc.struck * STRIKE.again - inc.idle })),
+      CART, PONG_BREAK: ENERGY.pong, SPAN, STRIKE, INTRUDE, level: LEVELS.indexOf(L) + 1,
       // which of the four shifts this is (1..4), whether it is a night played again on purpose (the repeat), its real length
       no: shiftNo, again: !!SH.again, realMs, SHIFTS,
       // what the next shift starts from (the page saves it at 05:30): energy, beans, the pace, the kinds met, the cartridges handed over

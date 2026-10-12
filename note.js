@@ -8,7 +8,9 @@
    every edge sampled every 0.25 px on the screen. Turned past edge-on it shows its back: plain paper, no writing. */
 (function () {
   const NOTE = { S: 137, at: [505, 679], lean: -2.2 * Math.PI / 180, Z: 1000, F: 1500, EYE: [720, 813], strip: .12, lift: 11, curl: 29,
-    yellow: { strip: '#EEE39E', body: '#F4EBAA' }, ink: '#5E5E5C' };
+    yellow: { strip: '#EEE39E', body: '#F4EBAA' }, ink: '#5E5E5C',
+    // Glenn's from '87 (night 2's gift; 2026-10-12, build step 9): the same note, yellowed, its glue strip a shade browner
+    old: { strip: '#E2D597', body: '#EBDFA4' } };
   const k = NOTE.Z / NOTE.F;
   // how far the sheet stands off the bezel (toward you) at (u across, v down), in px at the bezel
   function liftAt(u, v) {
@@ -38,6 +40,9 @@
   };
   const HAND = 'grace';
   const FIRST = { font: 'Caveat, cursive', ink: NOTE.ink, lines: [['login:', 14, 62, 30], ['your name', 12, 99, 30]] };
+  // Glenn's own, '87 (night 2's gift): "login:" over "glenn" and the date, in a hand that is none of the others' (Nothing You
+  // Could Do, OFL, in assets/fonts: a placeholder until Arnold picks one), its ink faded
+  const GLENN87 = { font: "'Nothing You Could Do', cursive", ink: '#6E6C66', lines: [['login:', 14, 48, 24], ['glenn', 14, 86, 30], ['19 Dec 87', 14, 120, 19]] };
   // a written note's writing: { font, ink, lines }
   function writing(name, date, hand = HAND) { const H = HANDS[hand] || HANDS[HAND]; return { font: H.font, ink: H.ink, lines: H.lines(name, date) }; }
   const fitOf = (text, size) => { const est = [...text].length * size * .5; return est > NOTE.S - 26 ? NOTE.S - 26 : 0; };   // (a rough advance: the browser fits it exactly)
@@ -69,11 +74,11 @@
   }
   // Held up in front of you, face on, as the papers are: place { cx, cy, k (px a note px), rot (degrees) }. Flat: the strip,
   // its line, the outline and the writing, no lift (it is in a hand, pressed flat by the thumb).
-  function flat(place, w = FIRST) {
+  function flat(place, w = FIRST, Y = NOTE.yellow) {
     const S = NOTE.S, A = NOTE.strip * S, a = (place.rot ?? -3) * Math.PI / 180, c = Math.cos(a) * place.k, sn = Math.sin(a) * place.k;
     const at = (u, v) => [place.cx + (u - S / 2) * c - (v - S / 2) * sn, place.cy + (u - S / 2) * sn + (v - S / 2) * c];
     const quad = (v0, v1) => [at(0, v0), at(S, v0), at(S, v1), at(0, v1)];
-    const Y = NOTE.yellow, o = at(0, 0);
+    const o = at(0, 0);
     const m = [c, sn, -sn, c, o[0], o[1]];
     return `<polygon points="${fmt(quad(A, S))}" fill="${Y.body}" stroke="${Y.body}" stroke-width=".5"/>` +
       `<polygon points="${fmt(quad(0, A))}" fill="${Y.strip}" stroke="${Y.strip}" stroke-width=".5"/>` +
@@ -91,7 +96,7 @@
     const peel = ms <= 260 ? 1.1 * (ms / 260) ** 2 : 1.1 + (ms - 260) / 260;
     return { peel, drop: dropAt(Math.max(0, ms - 260)) };
   }
-  const api = { NOTE, shapes, svg, flat, writing, HANDS, HAND, FIRST, motionAt, liftAt, END: 900 };
+  const api = { NOTE, shapes, svg, flat, writing, HANDS, HAND, FIRST, GLENN87, motionAt, liftAt, END: 900 };
   if (typeof window !== 'undefined') window.loginNote = api;
   if (typeof module !== 'undefined') module.exports = api;
 })();

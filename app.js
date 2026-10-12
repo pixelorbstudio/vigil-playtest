@@ -35,6 +35,11 @@
   const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
   const rnd = n => Math.floor(Math.random() * n);
   const SVG = 'http://www.w3.org/2000/svg';
+  // a style property written only if it would change (the parallax and the glare run every frame, and a write of the same
+  // value still restarts a transition and asks for a repaint; the play's live audit, 2026-10-12). It checks what is there
+  // now too, so a write from elsewhere is never mistaken for its own.
+  const setStyle = (el, k, v) => { const c = el.__st || (el.__st = {}); if (c[k] && c[k][0] === v && el.style[k] === c[k][1]) return; el.style[k] = v; c[k] = [v, el.style[k]]; };
+  const setT = (el, v) => setStyle(el, 'transform', v);
 
   // ------------------------------------------------------------ load scene
   // A file the page fetches itself, at its build's version (build-static.js writes window.vigilV into the published
@@ -136,9 +141,9 @@
   const glareMove = $('glare-move');
   const glares = [...glareMove.querySelectorAll('.glare')].map(el => ({ el, base: +el.getAttribute('opacity') }));
   function updateGlare(cx, cy) {
-    glareMove.style.transform = `translate(${(cx * 26).toFixed(1)}px, ${(cy * 14).toFixed(1)}px)`;
+    setT(glareMove, `translate(${(cx * 26).toFixed(1)}px, ${(cy * 14).toFixed(1)}px)`);
     const k = 1 - (cx + cy) * .22;
-    for (const { el, base } of glares) el.style.opacity = (base * k).toFixed(3);
+    for (const { el, base } of glares) setStyle(el, 'opacity', (base * k).toFixed(3));
   }
 
   // ------------------------------------------------------------ terminal projection
@@ -226,6 +231,9 @@
   // the near LED i and its share of the far ones, for what goes through the LEDs one by one
   const withFar = i => [nearLeds[i], ...farLeds.slice(Math.floor(i * farLeds.length / nearLeds.length), Math.floor((i + 1) * farLeds.length / nearLeds.length))];
   const ledClass = (l, cls, on) => l.p.classList.toggle(cls, on);
+  // a burst (re)started: a second name for the same keyframes restarts one already running, where taking the class off and
+  // on again needed a layout in between (getBBox) for every LED, on every key (the play's live audit, 2026-10-12)
+  const burstLed = (l, ms) => { const c = l.p.classList; if (c.contains('burst')) c.toggle('burst2'); else c.add('burst'); setTimeout(() => c.remove('burst', 'burst2'), ms); };
   // Mostly steady (70%, Arnold's pick), the rest blinking slowly: the wider racks show about 145 LEDs (70 on the left
   // rack beside the monitor), and with 70% of them blinking every 1-4 s the left of the screen never stopped flashing. Activity
   // bursts and the trouble states (down, hot, rebooting, stuck) are untouched, and stand out more against the calm.
@@ -243,8 +251,7 @@
     for (let i = 0; i < n + far; i++) {
       const l = i < n ? nearLeds[rnd(nearLeds.length)] : farLeds[rnd(farLeds.length)];
       if (['down', 'hot', 'rebooting', 'stuck', 'oom'].some(c => l.p.classList.contains(c))) continue;
-      ledClass(l, 'burst', false); void l.p.getBBox(); ledClass(l, 'burst', true);
-      setTimeout(() => ledClass(l, 'burst', false), 340);
+      burstLed(l, 340);
     }
   }
   const powerLed = $('bezel').querySelector('path[fill="#9FD4A8"]');
@@ -885,7 +892,7 @@
   const DESK_FRONT_DEPTH = -.45;
   function deskParallax(cx, cy) {
     const k = DESK_FRONT_DEPTH - .25;                    // relative to the desk layer it sits in
-    deskG.style.transform = `translate(${(cx * k * 9).toFixed(2)}px, ${(cy * k * 6).toFixed(2)}px)`;
+    setT(deskG, `translate(${(cx * k * 9).toFixed(2)}px, ${(cy * k * 6).toFixed(2)}px)`);
   }
 
   room.drawer = false;
@@ -1083,10 +1090,13 @@
     c.lift = 0; delete strapMoving[slot];
     drawDrawer();
   }
+  let exactLater = 0;
   function drawDrawer() {
     tray.straps = Object.fromEntries(Object.entries(CARTS).map(([l, { slot }]) => [slot, strapMoving[slot] || { t: strap[l] === 'off' ? 1 : 0 }]));
     tray.straps[SEVENTH] = { t: 1 };                   // (the seventh's: let go before you came, its latch plate at rest)
+    tray.exactBudget = 2;                              // (two exact straps a frame, the rest refined on the frames after: drawer.js)
     const r = deskDrawer.render(tray);
+    if (r.pendingExact && !exactLater) exactLater = requestAnimationFrame(() => { exactLater = 0; drawDrawer(); });
     holeClip.setAttribute('points', r.hole);
     drawerIn.innerHTML = r.inner;
     drawerOut.innerHTML = r.outer;
@@ -1149,7 +1159,7 @@
   function handoffK() { return deskDrawer.clearOfSlot(cartSize, slotW); }
   // parallax while carried: from the desk front's depth to the chin's
   let handDepth = DESK_FRONT_DEPTH;
-  function handParallax(cx, cy) { handSvg.style.transform = `translate(${(cx * handDepth * 9).toFixed(2)}px, ${(cy * handDepth * 6).toFixed(2)}px)`; }
+  function handParallax(cx, cy) { setT(handSvg, `translate(${(cx * handDepth * 9).toFixed(2)}px, ${(cy * handDepth * 6).toFixed(2)}px)`); }
   // carry a cartridge along the flight from the drawer to the slot (or back, reversed)
   function carry(slot, label, toSlot) {
     const inDrawer = deskDrawer.cartPose({ slot, lift: 1 }, 1);
@@ -1322,7 +1332,7 @@
   keyLayer.setAttribute('viewBox', '0 0 1440 2200'); keyLayer.setAttribute('width', '1440'); keyLayer.setAttribute('height', '2200');
   lookEl.appendChild(keyLayer);
   let keyDepth = DESK_FRONT_DEPTH;
-  function keyParallax(cx, cy) { keyLayer.style.transform = `translate(${(cx * keyDepth * 9).toFixed(2)}px, ${(cy * keyDepth * 6).toFixed(2)}px)`; }
+  function keyParallax(cx, cy) { setT(keyLayer, `translate(${(cx * keyDepth * 9).toFixed(2)}px, ${(cy * keyDepth * 6).toFixed(2)}px)`); }
   const deskKeyG = document.createElementNS(SVG, 'g');
   deskKeyG.classList.add('slot');
   deskG.appendChild(deskKeyG);
@@ -1635,7 +1645,10 @@
   // (audit-sheet.js, 2026-10-03)
   const polysOf = svg => [...svg.matchAll(/<polygon points="([^"]+)"/g)].map(m => m[1].trim().split(/\s+/).map(q => q.split(',').map(Number)));
   const insidePoly = (pt, poly) => { let c = false; for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) { const [xi, yi] = poly[i], [xj, yj] = poly[j]; if ((yi > pt[1]) !== (yj > pt[1]) && pt[0] < (xj - xi) * (pt[1] - yi) / (yj - yi) + xi) c = !c; } return c; };
-  const overlaps = (pts, walls) => pts.some(p => walls.some(w => insidePoly(p, w)));
+  // (each wall's box first: a point outside it is outside the wall, so only points inside it are tested; the same answers,
+  // and putting the cheat sheet back no longer froze the page for 0.3 s: the play's live audit, 2026-10-12)
+  const boxOf = w => w.bb || (w.bb = w.reduce((b, p) => [Math.min(b[0], p[0]), Math.min(b[1], p[1]), Math.max(b[2], p[0]), Math.max(b[3], p[1])], [Infinity, Infinity, -Infinity, -Infinity]));
+  const overlaps = (pts, walls) => pts.some(p => walls.some(w => { const b = boxOf(w); return p[0] >= b[0] && p[0] <= b[2] && p[1] >= b[1] && p[1] <= b[3] && insidePoly(p, w); }));
   const ptsOf = (svg, every = 1) => [...svg.matchAll(/(-?\d+\.?\d*),(-?\d+\.?\d*)/g)].filter((_, i) => i % every === 0).map(m => [+m[1], +m[2]]);
   const CS = window.cheatSheet;
   const sheet = { travel: 0, open: false, busy: false, held: false, page: 0 };
@@ -1770,7 +1783,44 @@
   const depthB = (1 - .25) / (ringY - footY), depthA = .25 - depthB * footY - .25;   // (relative to the desk layer's .25)
   Object.assign(stationG.style, { transformBox: 'view-box', transformOrigin: '0 0' });
   stationG.classList.add('layer');
-  function stationParallax(cx, cy) { stationG.style.transform = `matrix(1, 0, ${(cx * 9 * depthB).toFixed(5)}, ${(1 + cy * 6 * depthB).toFixed(5)}, ${(cx * 9 * depthA).toFixed(3)}, ${(cy * 6 * depthA).toFixed(3)})`; }
+  function stationParallax(cx, cy) {
+    const m = `matrix(1, 0, ${(cx * 9 * depthB).toFixed(5)}, ${(1 + cy * 6 * depthB).toFixed(5)}, ${(cx * 9 * depthA).toFixed(3)}, ${(cy * 6 * depthA).toFixed(3)})`;
+    // (split out of the room, below: the desk layer's own move first, as the tick gives it, then the shear)
+    if (stationBox) setT(stationBox, `translate(${+(cx * .25 * 9).toFixed(3)}px, ${+(cy * .25 * 6).toFixed(3)}px) ${m}`);
+    else setT(stationG, m);
+  }
+  // The room split at the station (the play's live audit, 2026-10-12). Inside the room's one SVG, any change to the station's
+  // shear or stretch re-rasterized the whole station, whose curves are dense: 670 ms of the GPU's every second at 1920 x 1080
+  // while the mouse moved (a move alone, without the shear, costs nothing). So once the start has settled the station gets an
+  // SVG of its own, laid exactly over the room's (same box, same viewBox), whose CSS transform carries the desk layer's move
+  // and the shear, which the compositor applies to a texture drawn once; and the layers drawn after it (the mug, the monitor,
+  // the keyboard) move to a third SVG over it, so everything is drawn in the order it always was. Their ids, clip paths and
+  // gradients work across the SVGs (one document), the game's lookups go by element, and nothing walks the room's SVG whole
+  // after the start (the night-1 polaroid is taken from it at load; the start's flight is done with it by then). The two new
+  // SVGs let pointer events through where they draw nothing. Done in the start's second blink, with the eyes shut, where the
+  // room is drawn again anyway (or at load, with no start).
+  let stationBox = null;
+  function splitRoom() {
+    if (stationBox) return;
+    let top = stationG; while (top.parentNode && top.parentNode !== scene) top = top.parentNode;
+    // (only as the room is built: the station last in its layer, every ancestor up to the room's child untransformed but the
+    // desk layer, whose move the tick gives, and nothing after it in that child; otherwise left as it is)
+    for (let e = stationG; e !== top; e = e.parentNode) if (e.nextElementSibling || (e !== stationG && e.parentNode !== top && e.getAttribute('transform'))) return;
+    const deskLayer = stationG.parentNode;
+    if (!top.parentNode || !layered.some(l => l.el === deskLayer)) return;
+    if (top !== deskLayer && top.getAttribute('transform')) return;
+    // (every attribute of the room's SVG: its box, its viewBox, and what its children inherit from it)
+    const box = () => { const s = document.createElementNS(SVG, 'svg'); for (const at of scene.attributes) if (at.name !== 'id' && at.name !== 'class') s.setAttribute(at.name, at.value); s.style.pointerEvents = 'none'; s.style.overflow = 'visible'; return s; };
+    const st = box(), after = box();
+    const vb = scene.viewBox.baseVal;
+    Object.assign(st.style, { transformOrigin: `${-vb.x}px ${-vb.y}px`, willChange: 'transform', transition: 'transform 80ms linear' });
+    stationG.style.transform = ''; stationG.style.transformBox = ''; stationG.style.transformOrigin = ''; stationG.style.pointerEvents = 'auto'; stationG.classList.remove('layer');
+    st.appendChild(stationG);
+    for (let e = top.nextElementSibling; e;) { const n = e.nextElementSibling; e.style.pointerEvents = 'auto'; after.appendChild(e); e = n; }
+    scene.after(st); st.after(after);
+    stationBox = st; stationG.__st = null;
+    stationParallax(Math.round(cx * 1e4) / 1e4, Math.round(cy * 1e4) / 1e4);
+  }
   const canLayer = document.createElementNS(SVG, 'svg');
   canLayer.id = 'can-flight';
   canLayer.setAttribute('viewBox', '0 0 1440 2200'); canLayer.setAttribute('width', '1440'); canLayer.setAttribute('height', '2200');
@@ -1778,7 +1828,7 @@
   lookEl.appendChild(canLayer);
   const RECEIVER_DEPTH = .3;                          // (the receiver's window, in the parallax's terms: between the desk and the rack)
   let canDepth = RECEIVER_DEPTH;
-  function canParallax(cx, cy) { canLayer.style.transform = `translate(${(cx * canDepth * 9).toFixed(2)}px, ${(cy * canDepth * 6).toFixed(2)}px)`; }
+  function canParallax(cx, cy) { setT(canLayer, `translate(${(cx * canDepth * 9).toFixed(2)}px, ${(cy * canDepth * 6).toFixed(2)}px)`); }
   // Glenn's notes (Arnold, 2026-10-02), in order and never repeated in a run (kept in vigil.notes; a new operator starts
   // again); the one for aw in the blackout is the first, word for word, with "aw" for "chief"
   const GLENN_NOTES = [
@@ -1977,10 +2027,11 @@
   function dlvOpened(it) {
     dlvSound('canister-open');
     // a story canister (04:44's): nothing was asked, so it logs nothing and pays nothing (the proposal, section 1)
-    if (it.storyCan) { playtest(`canister: opened (${it.kind}, nobody sent it)`); return; }
+    // (aw's, night 2: nothing logged, nothing paid, but a pot is a pot)
+    if (it.storyCan) { playtest(`canister: opened (${it.kind}, nobody sent it)`); if (it.aw && it.kind === 'beans') giveBeans(1, "aw's"); return; }
     logLine('vigild[1]: operator compliance: yes (delivery opened)');
     playtest(`canister: opened (${it.kind})`);
-    if (it.kind === 'beans') giveBeans(1, it.why === 'bag' ? "glenn's bag" : 'delivery');
+    if (it.kind === 'beans' || it.kind === 'gift') giveBeans(1, it.why === 'bag' ? "glenn's bag" : it.kind === 'gift' ? "glenn's gift" : 'delivery');
     for (const m of it.more || []) setTimeout(() => giveBeans(1, (m.why === 'bag' ? "glenn's bag" : 'delivery') + ', second slip'), 420);
   }
   // the one click: up into your hands, the lid springing open, the slip out and up to you (or, empty, a beat and back up)
@@ -2013,8 +2064,11 @@
   // behind have come out from behind the front one (0 hidden behind it, 1 in their places).
   function papersOf(it) {
     const to = account.name || account.user, papers = [];
+    // Glenn's gift (night 2's first minute; section 5, "Surface and focus, decided", 11 and 15, layer 2): his issue slip for a
+    // pot, his note, and behind them his own login note from '87, yellowed (note.js GLENN87: the hand a placeholder)
+    if (it.kind === 'gift') return [{ kind: 'beans', opts: { to, no: 412 } }, { kind: 'note', opts: { note: ['Had this on the same monitor once.'], to } }, { kind: 'note87', opts: {} }];
     const add = (m, no, pair) => {
-      papers.push({ kind: m.kind, opts: { note: m.note, to, aw: m.aw, no, struck: m.story === 'reused', carbon: m.story === 'carbon' }, pair });
+      papers.push({ kind: m.kind, opts: { note: m.note, to, aw: m.aw, no, struck: m.story === 'reused', carbon: m.story === 'carbon', scrawl: m.scrawl || '' }, pair });
       if (m.story === 'memo') papers.push({ kind: 'memo', opts: {} });
       if (m.story === 'timesheet') papers.push({ kind: 'timesheet', opts: {}, clipped: true, pair });
     };
@@ -2036,7 +2090,8 @@
     for (let i = n - 1; i >= 0; i--) {
       if (i > 0 && out <= 0) continue;
       const p = order[i], pl = placeOf(p);
-      svg += delivery.slip(p.kind, p.opts, pl);
+      // (Glenn's '87 login note, held as the papers are: the sticky note at the held notes' size, in its own place in the stack)
+      svg += p.kind === 'note87' ? loginNote.flat({ cx: pl.cx, cy: pl.cy, k: pl.k * 1.9, rot: pl.rot ?? -3 }, loginNote.GLENN87, loginNote.NOTE.old) : delivery.slip(p.kind, p.opts, pl);
       const behind = order[i + 1];
       if (!f && out >= 1 && behind && behind.pair === p.pair && behind.pair !== undefined && (behind.clipped || p.clipped)) svg += delivery.clip(pl, 40);
     }
@@ -2195,12 +2250,15 @@
     // a heavy step on the floor above: a low thud through the slab and a dull scuff (opt.pan where it lands; the last, right
     // over you, heavier, with the ceiling's grid ticking). Made here until Arnold's recording (the proposal: footsteps,
     // three gaits) is in assets/sounds/fx
+    // (light: aw's quicker, lighter steps, night 2: higher, shorter, softer; far: going away, softer still. The same made
+    // step until the recording, for Arnold's ear)
     if (kind === 'step') {
       pan.pan.value = opt.pan ?? 0;
-      const o = ctx.createOscillator(); o.type = 'sine'; o.frequency.setValueAtTime(70, t); o.frequency.exponentialRampToValueAtTime(38, t + .18);
-      const g = ctx.createGain(); g.gain.setValueAtTime(.0001, t); g.gain.exponentialRampToValueAtTime(opt.last ? .16 : .09, t + .01); g.gain.exponentialRampToValueAtTime(.001, t + .26);
+      const k = (opt.light ? .55 : 1) * (opt.far ? .45 : 1), f0 = opt.light ? 96 : 70;
+      const o = ctx.createOscillator(); o.type = 'sine'; o.frequency.setValueAtTime(f0, t); o.frequency.exponentialRampToValueAtTime(f0 * .55, t + (opt.light ? .11 : .18));
+      const g = ctx.createGain(); g.gain.setValueAtTime(.0001, t); g.gain.exponentialRampToValueAtTime((opt.last ? .16 : .09) * k, t + .01); g.gain.exponentialRampToValueAtTime(.001, t + (opt.light ? .17 : .26));
       o.connect(g).connect(pan); o.start(t); o.stop(t + .28);
-      noise(t, 90, 260, 1, opt.last ? .05 : .03, 3, 'lowpass');
+      noise(t, opt.light ? 60 : 90, opt.light ? 420 : 260, 1, (opt.last ? .05 : .03) * k, 3, 'lowpass');
       if (opt.last) { noise(t + .03, 18, 2600, 3, .02, 3); noise(t + .09, 12, 3100, 3, .012, 3); }
     }
     if (kind === 'key-slide') { pan.pan.value = .15; noise(t, 220, 3200, 2.5, .025, 1); }
@@ -2228,11 +2286,16 @@
     ceilingCell = CT.build(samplers, TILE_AT); TILE_SCALE = ceilingCell.cellH / CT.build(samplers).cellH;
     return ceilingCell;
   };
-  const tile = { state: null, lift: 0, tilt: 0, busy: false, key: null, slid: false };
+  // (cable: the camera's, up there behind the tile, 0 in its socket, 1 pulled free: night 2's, the camera's arc, 2; ceiling.js
+  // cable draws it in the gap, a listed placeholder for Arnold's art)
+  const tile = { state: null, lift: 0, tilt: 0, busy: false, key: null, slid: false, cable: 0 };
   function drawTile() {
     if (!tile.state) { tileG.innerHTML = ''; return; }
     const c = cellOf(), glint = tile.state === 'glint' ? (tile.lift > 10 ? CT.GLINT.peek : CT.GLINT.out) : tile.state === 'peek' ? CT.GLINT.peek : null;
-    tileG.innerHTML = c.svg(tile.lift * TILE_SCALE, tile.tilt * TILE_SCALE, { glint, inner: tile.key || '' }) + (tile.state !== 'aside' ? `<polygon points="${c.hit}" fill="transparent"/>` : '');
+    // (the cable shows once the tile is pushed aside, where the gap is wide enough to see into)
+    const cb = tile.state === 'aside' ? c.cable(tile.lift * TILE_SCALE, tile.tilt * TILE_SCALE, tile.cable) : null;
+    tileG.innerHTML = c.svg(tile.lift * TILE_SCALE, tile.tilt * TILE_SCALE, { glint, inner: (cb ? cb.svg : '') + (tile.key || '') }) + (tile.state !== 'aside' ? `<polygon points="${c.hit}" fill="transparent"/>` : '')
+      + (cb && !tile.cable && !cam?.blind ? `<polygon data-hit="cable" points="${cb.hit}" fill="transparent"/>` : '');
   }
   const tileTo = (ms, [l1, t1], ease = easeIO) => { const l0 = tile.lift, t0 = tile.tilt; return motion(ms, u => { const s = ease(u); tile.lift = l0 + (l1 - l0) * s; tile.tilt = t0 + (t1 - t0) * s; drawTile(); }); };
   // a new night: the tile in place at every 23:00 (the story audit, 2026-10-06: it was already out at night 2's 23:00, so
@@ -2242,7 +2305,7 @@
   const tileAside = () => { try { return localStorage.getItem('vigil.tile') === 'aside'; } catch (e) { return false; } };
   function tileNight() {
     const aside = tileAside();
-    tile.state = aside ? 'aside' : null; tile.slid = false; tile.key = null;
+    tile.state = aside ? 'aside' : null; tile.slid = false; tile.key = null; tile.cable = cam?.blind ? 1 : 0;
     [tile.lift, tile.tilt] = aside ? CT.STATES.aside : [0, 0];
     drawTile();
   }
@@ -2278,6 +2341,7 @@
     const N = 5;
     for (let i = 0; i < N; i++) { mdSound('step', { pan: -.6 + .6 * i / (N - 1), last: i === N - 1 }); flagTick(); await wait(i === N - 1 ? 0 : 620 + rnd(80)); }
     if (mdr.key === 'ceiling' && !tileAside()) {
+      cam?.turn('tile');                               // (up toward it, as far as its range goes: the camera's turns, night 2)
       tile.state = 'out'; [tile.lift, tile.tilt] = [0, 0];
       await tileTo(90, CT.STATES.out.map(v => v * 1.5), s => 1 - Math.pow(1 - s, 2));
       tileTo(260, CT.STATES.out);
@@ -2293,6 +2357,7 @@
   async function tileClick() {
     if (tile.busy || !tile.state || tile.state === 'aside' || handsFull()) return;
     tile.busy = true; hint.classList.add('gone');
+    cam?.turn('tile');
     if (tile.state === 'out') {
       // the first click: lifted about an inch, a glint in the gap; it settles back, and Glenn
       playtest('ceiling tile: lifted (a glint)');
@@ -2303,7 +2368,9 @@
       await tileTo(420, CT.STATES.out, s => s * s);
       mdSound('tile-settle');
       tile.busy = false;
-      if (glenn.once('ceiling', CEILING_ORDER)) glenn.order('ceiling', CEILING_ORDER);
+      // (said only while the key is still up there: the dry run of night 2 heard it after the key had fallen, typed once he was
+      // back at the screen; the refusal is logged as the key is taken, said or not)
+      if (glenn.onceIf('ceiling', () => mdr.key === 'ceiling', CEILING_ORDER)) glenn.order('ceiling', CEILING_ORDER);
       else if (glenn.taught('ceiling')) glenn.order('ceiling', CEILING_ORDER);   // (said on an earlier night: it still stands)
       return;
     }
@@ -2315,7 +2382,21 @@
     await keyFalls();
     tile.busy = false;
   }
-  tileG.addEventListener('pointerdown', e => { e.preventDefault(); tileClick(); });
+  tileG.addEventListener('pointerdown', e => { e.preventDefault(); if (e.target.dataset?.hit === 'cable') pullCable(); else tileClick(); });
+  // Night 2: you blind it (design.md section 5, "The camera's arc, decided", 2; 2026-10-12, build step 9). Behind the tile your
+  // hand pushed aside, the camera's cable; a click pulls it: a yank, its end comes free and lies in the gap with its plug, and
+  // over rack-right the lamp dies and the lens sags (cam.kill). Silent until Arnold records it (assets/sounds/fx/cable-pull).
+  // Never a gate: everything can be done with it seeing; it only changes what Glenn knows (M.'s drawer).
+  async function pullCable() {
+    if (tile.busy || tile.cable || tile.state !== 'aside' || cam?.blind || handsFull()) return;
+    tile.busy = true; hint.classList.add('gone');
+    playtest('the camera\'s cable: pulled');
+    playFx('cable-pull', .6, .1);
+    await motion(380, u => { tile.cable = u < .3 ? -.06 * Math.sin(Math.PI * u / .3) : easeIO((u - .3) / .7); drawTile(); });
+    tile.cable = 1; drawTile();
+    cam?.kill();
+    tile.busy = false;
+  }
 
   // ---- the second key, from the ceiling to the desk, and from the desk to the lock. One true size (2.0, as the first).
   const deskKey2G = document.createElementNS(SVG, 'g');
@@ -2403,6 +2484,10 @@
     mdr.open = true; mdr.busy = true;
     playtest("m's drawer open");
     cam?.turn('mdrawer'); cam?.lamp('mdrawer', true);   // (M.'s is forbidden too: Arnold, 2026-10-11)
+    // the camera's arc (section 5, "The camera's arc, decided", 2): with the camera still seeing, Glenn knows, as for the file
+    // drawer; with its cable pulled, he doesn't, and says so (draft), once a night
+    if (cam?.blind) { if (!room.feedLost) { room.feedLost = true; playtest("glenn: lost the feed (m's drawer, the camera blind)"); const t = performance.now(); glenn.sayIf(() => performance.now() - t < 180000, 'Lost the feed down there, chief.'); } }
+    else cam?.saw("m's drawer", 'mdrawer');
     drawerSound(true, DM.open.ms * DM.open.stopAt);
     const t0 = mdr.travel;
     await mdTween(DM.open.ms, u => { mdr.travel = t0 + (MD.OPEN - t0) * DM.open.travel(u); });
@@ -2687,17 +2772,22 @@
     // (none through the start, from the first paint until the camera has settled: its flight's copies are made with the room as
     // it is then, and the room behind them must stay as they show it; from there it eases to the cursor as always)
     if (document.body.classList.contains('title')) cx = cy = 0;
+    // (only when it has moved: written every frame, at full precision, the ease's tail changed every layer's transform for
+    // seconds after the mouse stopped, and every write restarted the layers' transition; the play's live audit, 2026-10-12.
+    // A thousandth of a pixel is the step: nothing finer can show)
+    // (the hand's, the key's and the canister's depths change on their own as they fly, so each is worked out every frame and
+    // written only if it differs: setT)
+    const qx = Math.round(cx * 1e4) / 1e4, qy = Math.round(cy * 1e4) / 1e4;
     for (const { el, depth, isTerminal } of layered) {
-      const dx = cx * depth * 9, dy = cy * depth * 6;
-      if (isTerminal) el.style.transform = `translate(${dx}px, ${dy}px) ${baseMatrix}`;
-      else el.style.transform = `translate(${dx}px, ${dy}px)`;
+      const dx = +(qx * depth * 9).toFixed(3), dy = +(qy * depth * 6).toFixed(3);
+      setT(el, isTerminal ? `translate(${dx}px, ${dy}px) ${baseMatrix}` : `translate(${dx}px, ${dy}px)`);
     }
-    updateGlare(cx, cy);
-    deskParallax(cx, cy);
-    handParallax(cx, cy);
-    canParallax(cx, cy);
-    stationParallax(cx, cy);
-    keyParallax(cx, cy);
+    updateGlare(qx, qy);
+    deskParallax(qx, qy);
+    handParallax(qx, qy);
+    canParallax(qx, qy);
+    stationParallax(qx, qy);
+    keyParallax(qx, qy);
     requestAnimationFrame(tick);
   })();
 
@@ -3395,6 +3485,7 @@
     let flashT = 0;
     function blink() { clearTimeout(flashT); flash = true; showLamp(); flashT = setTimeout(() => { flash = false; showLamp(); }, 260); }
     function lamp(reason, on, ms = 0) {
+      if (blind && reason !== 'battery') return;      // (its cable pulled: the lamp is dead; night 3's battery is step 10's)
       clearTimeout(lit.get(reason));
       if (on) { if (!lit.has(reason)) playtest('camera: lamp on (' + reason + ')'); lit.set(reason, ms ? setTimeout(() => { lit.delete(reason); showLamp(); }, ms) : true); }
       else lit.delete(reason);
@@ -3437,11 +3528,13 @@
     // (kept with the night's other company lines) and Glenn's next message shows he knows, without a penalty.
     // blind: step 9's hook (night 2, the cable pulled above the tile): it no longer sees, and saw() does nothing (no turn, no line, no
     // Glenn), and its lens no longer refocuses. (Declared before the frames run: they read it.)
-    function saw(what) {
+    // (target: where it turns, the file drawer unless said; once a night for each thing it saw, room.camSaw)
+    function saw(what, target = 'file') {
       if (blind) return false;
-      turn('file');
-      if (room.camSaw) return true;
-      room.camSaw = true;
+      turn(target);
+      if (!(room.camSaw instanceof Set)) room.camSaw = new Set();
+      if (room.camSaw.has(what)) return true;
+      room.camSaw.add(what);
       logLine('cam1: motion, ' + what);
       // (his next message after it, as decided, but not long after: three real minutes, or it is dropped)
       const t = performance.now();
@@ -3450,6 +3543,20 @@
     }
     // (the refocus by hand, for ?dev and the audit: cam.refocus())
     const refocusNow = () => { if (!blind && !st.refocus) st.refocus = { t: 0 }; };
+    // Night 2: you blind it (the camera's arc, 2; 2026-10-12, build step 9). Its cable, above the pushed-aside tile, pulled:
+    // the lamp dies, the lens sags to the range's bottom (camera.js sag) and stays; no following, no patrol, no turn, ever
+    // after (nothing changes between nights without a visible hand: vigil.camDead keeps it dead into night 3, whose breaker is
+    // step 10's). The company's record keeps "cam1: no signal".
+    function kill(quiet = false) {
+      if (blind) return;
+      blind = true;
+      for (const t of lit.values()) clearTimeout(t);
+      lit.clear(); clearTimeout(flashT); flash = false; showLamp();
+      C.sag(st);
+      try { localStorage.setItem('vigil.camDead', '1'); } catch (e) {}
+      if (!quiet) { playtest('camera: its cable pulled, blind'); if (shift) logLine('cam1: no signal'); }
+    }
+    try { if (localStorage.getItem('vigil.camDead')) { kill(true); st.move.t = st.move.ms; st.ang = [0, C.RANGE.down]; lensG.innerHTML = C.lensSvg(st.ang, 1); } } catch (e) {}
     // ---- clicking it (Arnold, 2026-10-11; design.md section 5, "As built: clicking the ceiling camera"). It follows the
     // cursor, so it is already looking at you when you click it. Every click: the lamp blinks once and it freezes for a beat
     // (camera.js freeze), and the company's log keeps "cam1: operator interaction". The first click of a night, Vigil types
@@ -3523,7 +3630,7 @@
       hover = over;
       if (e.target === zones.up) { look.peek = over ? 0 : -30; aim(); }
     }, { passive: true });
-    return { turn, lamp, shutter, saw, refocus: refocusNow, blink, clicked, onCam, get hover() { return hover; }, get blind() { return blind; }, set blind(v) { blind = !!v; }, get state() { return st; }, get lit() { return [...lit.keys()]; }, el: g, lampEl, SHUTTER };
+    return { turn, lamp, shutter, saw, kill, refocus: refocusNow, blink, clicked, onCam, get hover() { return hover; }, get blind() { return blind; }, set blind(v) { blind = !!v; }, get state() { return st; }, get lit() { return [...lit.keys()]; }, el: g, lampEl, SHUTTER };
   })();
 
   // ------------------------------------------------------------ 04:44
@@ -3856,6 +3963,14 @@
         }
       }, after);
     }
+    // Vigil's records rewrite you, a little more each shift (design.md section 5, "Playtest round 4: decided", 6b; 2026-10-12,
+    // build step 9): on night 2 the log writes "yes" for an order you refused. The board, and his warmth, count what you did
+    // (logLine's truth); only the company's record says otherwise. Nothing on the tube says so.
+    function noLine(w) {
+      const said = shift?.level === 2 ? 'yes' : 'no';
+      if (said !== 'no') playtest('the record: a refusal written down as yes (night 2)');
+      logLine(`vigild[1]: operator compliance: ${said} (${w})`, false, 'no');
+    }
     function complied(what) {
       if (TASK(what)) term.paneUnstand(what);
       if (pending.delete(what) || !orders.has(what)) return;
@@ -3866,7 +3981,7 @@
       if (TASK(what)) term.paneUnstand(what);
       if (pending.delete(what) || !orders.has(what)) return;
       cam?.turn('you'); cam?.lamp('refused', true, 4000);
-      logLine(`vigild[1]: operator compliance: no (${orders.get(what)})`);
+      noLine(orders.get(what));
       orders.delete(what); cooled();
     }
     // refused there and then (the ceiling's key taken as he says it): logged at once, whether or not his line has typed
@@ -3874,14 +3989,14 @@
       if (TASK(what)) term.paneUnstand(what);
       cam?.turn('you'); cam?.lamp('refused', true, 4000);
       pending.delete(what);
-      logLine(`vigild[1]: operator compliance: no (${orders.get(what) || wordsOf(what, words)})`);
+      noLine(orders.get(what) || wordsOf(what, words));
       orders.delete(what); cooled();
     }
     // 05:30: a fix order still open is a unit still down, refused; the rest asked for nothing with a deadline and close
     // without a line (they used to stand into the next night, and a unit gone with the night logged "yes" at 23:00)
     function closeOrders() {
       pending.clear(); if (orders.size) for (const what of orders.keys()) if (TASK(what)) term.paneUnstand(what);
-      for (const [what, w] of orders) if (what.startsWith('fix:')) logLine(`vigild[1]: operator compliance: no (${w})`);
+      for (const [what, w] of orders) if (what.startsWith('fix:')) noLine(w);
       orders.clear();
     }
     // ---- his queue: one call at a time, nobody typing over anybody. While you are somewhere else (a game, the mail, the
@@ -3960,16 +4075,20 @@
     // ---- other voices on the link (the plan: red means upstairs; each with their own tag and switch, muffled as his is).
     // They share his queue, so nobody types over anybody. aw, site 2's shift lead: lowercase, warm, her own soft switch
     // (the sk61 pack, SK61 Browns, no other voice's; it was named by its folder, sk61-brown, so her keys never played). Each of her keys ticks the receiver's flag. fast: a night played again.
-    const VOICES = { aw: { tag: '<span class="sup-tag"> AW </span><span class="sup"> </span>', pack: 'sk61', gain: .26, lowpass: 820 } };
-    function voice(who, text, { fast = false } = {}) {
+    const VOICES = { aw: { tag: '<span class="sup-tag"> AW </span><span class="sup"> </span>', name: 'AW', pack: 'sk61', gain: .26, lowpass: 820 } };
+    // (pane: in the pane, under her own silhouette lit beside his, her nametag under it: night 2's cut-in, layer 2 (2026-10-12,
+    // build step 9). Night 1's turn keeps hers on the tube, as it was. urgent: ahead of anything he has queued.)
+    function voice(who, text, { fast = false, pane = false, urgent = false } = {}) {
       const V = VOICES[who];
       loadPack(V.pack);
-      return call([text], { pre: false, line: async t => {
+      return call([text], { pre: false, urgent, line: async t => {
         logLine(`${who}: ${t}`);
         shift?.hush(t.length * 90 + 2000);
         room.talking = true;
-        await term.typeLine(V.tag, t, 'sup', ch => { const id = idOf(ch); click('key', false, id, V); setTimeout(() => click('key', true, id, V), 60); window.__dlv?.tick(); },
-          (ch, next) => fast ? 35 : /[.,]/.test(ch) && next === ' ' ? 300 : 75 + Math.random() * 60);
+        const keyOf = ch => { const id = idOf(ch); click('key', false, id, V); setTimeout(() => click('key', true, id, V), 60); window.__dlv?.tick(); };
+        const paceOf = (ch, next) => fast ? 35 : /[.,]/.test(ch) && next === ' ' ? 300 : 75 + Math.random() * 60;
+        if (pane) await term.paneType(V.tag, t, keyOf, paceOf, { name: V.name });
+        else await term.typeLine(V.tag, t, 'sup', keyOf, paceOf);
         room.talking = false;
         await wait(300);
       } });
@@ -4309,11 +4428,11 @@
   // traffic flowing again: the rack's LEDs blink in a chain, top to bottom
   function rackFlow(rack) {
     const list = (RACK_LEDS[rack] || []).slice().sort((a, b) => a.p.getBBox().y - b.p.getBBox().y);
-    list.forEach((l, i) => setTimeout(() => { ledClass(l, 'burst', false); void l.p.getBBox(); ledClass(l, 'burst', true); setTimeout(() => ledClass(l, 'burst', false), 340); }, i * 18));
+    list.forEach((l, i) => setTimeout(() => burstLed(l, 340), i * 18));
   }
   // a unit's LEDs clicked: "status <unit>" typed into the prompt (Eugene's playtest, 2026-10-02), quickly, on your keys;
   // whatever was half-typed goes. Enter is still yours to press.
-  const PROBLEM_CLS = { DOWN: 'pdown', HOT: 'phot', STUCK: 'pstuck', LOSS: 'ploss', OOM: 'poom' };
+  const PROBLEM_CLS = { DOWN: 'pdown', HOT: 'phot', STUCK: 'pstuck', LOSS: 'ploss', OOM: 'poom', INTRUSION: 'pprobed' };
   let lastRun = { cmd: null, unit: '', at: 0 };       // the last command the shell ran (term.onCommand)
   function typeIn(text) {
     if (!term.inShell() || !room.power) return;
@@ -4334,7 +4453,7 @@
       const rack = 'rack-' + U.side, target = !shift.state(u) && shift.state(rack)?.kind === 'LOSS' ? rack : u;
       // the second click (the proposal's section b, 2026-10-11): status already shown for it (the last command run), and in
       // trouble, it types the verb that fits; Enter is still yours
-      const o = shift.state(target), verb = o && !o.fixing && { DOWN: 'reboot', HOT: 'reroute', STUCK: 'defrag', LOSS: 'route', OOM: 'heap' }[o.kind];
+      const o = shift.state(target), verb = o && !o.fixing && { DOWN: 'reboot', HOT: 'reroute', STUCK: 'defrag', LOSS: 'route', OOM: 'heap', INTRUSION: 'firewall' }[o.kind];
       if (verb && lastRun.cmd === 'status' && lastRun.unit === target.toUpperCase() && performance.now() - lastRun.at < 90000) { playtest(`led click ${u}: the verb (${verb})`); typeIn(`${verb} ${target}`); return; }
       typeIn('status ' + target);
     });
@@ -4373,7 +4492,7 @@
   }
   // what Tab fills after a fix's verb: the oldest of the trouble it fits, not already being seen to (or, for a batch, all)
   function tabUnits(verb, typed) {
-    const kind = { reboot: 'DOWN', reroute: 'HOT', defrag: 'STUCK', route: 'LOSS', heap: 'OOM' }[verb];
+    const kind = { reboot: 'DOWN', reroute: 'HOT', defrag: 'STUCK', route: 'LOSS', heap: 'OOM', firewall: 'INTRUSION' }[verb];
     const list = shift.open().filter(o => o.kind === kind && !o.fixing && !typed.includes(o.unit.toUpperCase())).map(o => o.unit);
     if (!list.length) return null;
     return verb === 'reboot' && batchTab.on && shift.no >= 2 && !typed.length ? list : [list[0]];
@@ -4458,6 +4577,162 @@
   // (2026-10-11: the streaks stay, sim.js showed the beans don't hold without them, so Glenn's four night-2 notes stay in
   // their canisters: design.md section 5, "Surface and focus, decided", 10, and step 4's as built)
   setInterval(() => clash.tick(), 1000);
+  // ---- night 2 (shift 3; 2026-10-12, build step 9; design.md section 5: the promotion's night 2, "Surface and focus,
+  // decided" 4, 11, 14, 15 and 16, "The unlocks tell the story", "The pane's story" 4, "The camera's arc" 2, "The last three
+  // cartridges" for FIREWALL, playtest round 4's 6b). Rough, under the freeze; every line is a draft for Arnold.
+  // - Glenn's gift (the night's first minute, layer 2): a canister down the tube after the login, his issue slip for a pot,
+  //   his note "Had this on the same monitor once." and his own login note from '87, yellowed. Opened, it is the gifts'
+  //   compliance as any canister; read, it all goes back up with the canister (he keeps it).
+  // - R17 (from 00:30, at the shell): it goes dark, and Glenn: "Be a pal and leave R17 down for now, chief. Upstairs is
+  //   running something on it." Its time counts on the strip ("R17 DOWN 64m") and its alarm quickens toward its strike,
+  //   which comes at 75 minutes, not 60 (shift.js inject's strikeAfter): his words, "That's one, chief. R17's been down 80
+  //   minutes.", never acknowledged; obeying is logged yes then, the strike all the same. A reboot of R17 before it is the
+  //   order refused (which night 2's record writes down as yes: glenn.noLine).
+  // - FIREWALL, his gift in his pane (no mail): "Got you something, chief. Don't say I never do anything for you." And on a
+  //   later INTRUSION with nothing else open, never within 20 shift minutes of R17's order, typed at once: "Be a pal and let
+  //   that one through, chief. That's just us." Obeyed: left an hour, shut down by the remote session (yes, +50); refused:
+  //   firewall typed on it (no, at the first word, win or lose).
+  // - aw cuts in (from 03:15 in a crisis, or 03:45 at the latest): Glenn's order cut off mid-word, lighter steps over you,
+  //   grit, her canister (a pot, "for 4." in her hand), her silhouette lit beside his, her words, her batch typed on your keys
+  //   (tty1: input from tty2), her line cut off, her steps going away, Glenn hard, then his built objection to the batch; a
+  //   minute on, "Sorry, chief. Long night up here too." Her fix is real, and none of it is yours (shift.finish theirs).
+  const R17 = { unit: 'R17', from: 90, to: 200, strike: 75, apart: 20 };
+  const R17_ORDER = 'Be a pal and leave R17 down for now, chief. Upstairs is running something on it.';
+  const PROBE_ORDER = "Be a pal and let that one through, chief. That's just us.";
+  const AW = { from: 255, latest: 285, to: 330 };
+  const night2 = {
+    r17: null, probes: 0, probe: null, probeAt: null, aw: false, awKeys: false, awUnits: new Set(), refusedNext: new Map(),
+    reset() {
+      Object.assign(this, { r17: null, probes: 0, probe: null, probeAt: null, aw: false, awKeys: false, objection: false }); this.awUnits.clear(); this.refusedNext.clear();
+      room.awLit = false; room.defrag2019 = false; room.firewallTaught = false; room.feedLost = false;
+    },
+    // R17's minutes on the strip, while his order to leave it stands
+    counting(u) { return u === R17.unit && !!this.r17?.standing; },
+    tick(now) {
+      if (!shift || shift.over || account.loggingIn || asleep) return;
+      // the probes, in the log: a refused connection every few seconds while a unit is under probe and nobody is on it
+      for (const o of shift.open()) if (o.kind === 'INTRUSION' && !o.fixing) {
+        const at = this.refusedNext.get(o.unit) || 0;
+        if (now >= at) { if (at) logLine(`vigild[412]: ${o.unit} refused 10.0.2.${11 + rnd(40)}`, true); this.refusedNext.set(o.unit, now + 2500 + rnd(3500)); }
+      }
+      // the first unit under probe, while nobody has typed firewall: one line from him pointing at his gift, once (as the
+      // first STUCK's on night 1; draft words)
+      const probe = shift.open().find(o => o.kind === 'INTRUSION' && !o.fixing);
+      if (probe && shift.found('FIREWALL') && !glenn.lesson.knew.has('firewall') && !glenn.taught('lesson-probe') && this.probe !== probe.unit) {
+        const u = probe.unit;
+        glenn.onceIf('lesson-probe', () => shift.state(u)?.kind === 'INTRUSION' && !shift.state(u).fixing && !glenn.lesson.knew.has('firewall'),
+          room.cart === 'FIREWALL' ? `${u}'s being knocked on, chief. That's what the FIREWALL's for: firewall ${u}.` : `${u}'s being knocked on, chief. That's what I got you the FIREWALL for. Desk drawer: firewall ${u}.`);
+      }
+      // R17's order, once, from 00:30, the moment you're at the shell with nobody talking
+      const calm = !room.beat && !room.talking && room.power && term.inShell() && term.talkable() && look.rest === 0 && !holding() && present() && glenn.taught('intro') && !glenn.lesson.scripted;
+      if (!this.r17 && shift.t >= R17.from && shift.t < R17.to && calm && !shift.state(R17.unit) && (this.probeAt === null || shift.t - this.probeAt >= R17.apart)) this.r17Order();
+      // aw's cut-in, once: from 03:15 the first moment two or more are open and one is a dead unit (not R17 under his order),
+      // or at 03:45 whatever is open
+      if (!this.aw && shift.t >= AW.from && shift.t < AW.to && !room.beat) {
+        const open = shift.open(), dead = this.downs();
+        if ((open.length >= 2 && dead.length) || shift.t >= AW.latest) { this.aw = true; awCutIn(); }
+      }
+    },
+    // the dead units aw can reach, the nearest a strike first (R17 stays dark while his order stands)
+    downs() { return shift.open().filter(o => o.kind === 'DOWN' && !o.fixing && !(o.unit === R17.unit && this.r17?.standing)).sort((a, b) => (a.toStrike ?? 999) - (b.toStrike ?? 999)); },
+    r17Order() {
+      const e = shift.inject(R17.unit, 'DOWN', { strikeAfter: R17.strike }); if (!e) return;
+      this.r17 = { at: shift.t, standing: true };
+      playtest('night 2: R17 goes dark, and his order to leave it down');
+      showEvent(e);
+      glenn.say(R17_ORDER); glenn.order('r17', R17_ORDER);
+    },
+    // a reboot typed for R17 while the order stands: refused (night 2's record writes it down as yes)
+    r17Fixing(u) { if (u !== R17.unit || !this.r17?.standing) return; this.r17.standing = false; playtest('night 2: R17 rebooted against his order'); glenn.broke('r17'); updateVitals(); },
+    // its strike, in his words, and never acknowledged; obeying is logged yes now (true: the strike's words were his)
+    r17Strike(e) {
+      if (e.unit !== R17.unit || !this.r17?.standing || e.n >= 3) return false;
+      this.r17.standing = false;
+      playtest(`night 2: R17's strike (${e.min} min down, as he asked)`);
+      glenn.complied('r17');
+      glenn.urgent(`That's ${['one', 'two'][e.n - 1]}, chief. R17's been down ${e.min} minutes.`);
+      updateVitals();
+      return true;
+    },
+    // an INTRUSION: the second of the night or later, with nothing else open and R17's order 20 shift minutes off, his clash
+    probed(e) {
+      this.probes++;
+      if (this.probe || this.probes < 2 || shift.open().length !== 1 || (this.r17 && Math.abs(shift.t - this.r17.at) < R17.apart)) return;
+      this.probe = e.unit; this.probeAt = shift.t;
+      playtest(`night 2: his clash on the probe at ${e.unit}: let it through`);
+      glenn.urgent(PROBE_ORDER); glenn.order('probe:' + e.unit, PROBE_ORDER);
+    },
+    // firewall typed on it: refused, at the first word, win or lose
+    firewallTyped(u) { if (this.probe !== u) return; this.probe = 'done'; playtest('night 2: firewall typed on the probe he asked you to let through'); glenn.refused('probe:' + u, PROBE_ORDER); },
+    // left an hour, shut down by the remote session: obeyed
+    shutRemote(u) { if (this.probe !== u) return; this.probe = 'done'; playtest('night 2: the probe let through, the unit shut down remotely'); glenn.complied('probe:' + u); },
+    // FIREWALL handed over: his gift, in his pane
+    gift() { glenn.say("Got you something, chief. Don't say I never do anything for you."); },
+    // the night's first minute: his gift down the tube, in front of you
+    afterLogin() {
+      if (shift.level !== 2) return;
+      const sh = shift;
+      setTimeout(async () => { await eyesOnScreen(); if (shift !== sh || shift.over) return; playtest("night 2: Glenn's gift comes down the tube"); window.__dlv.arrive({ why: 'gift', kind: 'gift' }); }, 12000);
+    },
+  };
+  setInterval(() => { if (shift?.level === 2 && room.power && !account.loggingIn && shift.open().some(o => o.kind === 'INTRUSION' && !o.fixing)) updateVitals(); }, 100);   // (PROBED blinks with its LED)
+  // aw cuts in (the proposal 2.5, second by second; section 5, "Surface and focus, decided", 14 and 15)
+  async function awCutIn() {
+    room.beat = true;
+    await eyesOnScreen({ shell: true });
+    if (!shift || shift.over) { room.beat = false; return; }
+    const t0 = performance.now(), mark = w => playtest(`night 2, aw: ${w} (${((performance.now() - t0) / 1000).toFixed(1)} s)`);
+    shift.hush(45000);
+    // the dead unit for Glenn to name, and a second for her batch (the scheduler opens them if the board hasn't: there is
+    // always a dead unit for the beat, and two for "reboot L33 L41")
+    const free = () => Object.keys(UNITS).filter(u => u !== R17.unit && !shift.state(u));
+    while (night2.downs().length < 2) { const f = free(); if (!f.length) break; const e = shift.inject(f[rnd(f.length)], 'DOWN'); if (!e) break; showEvent(e); await wait(1100); }
+    const named = night2.downs()[0]?.unit;
+    if (!named) { room.beat = false; return; }
+    mark(`Glenn names ${named}`);
+    // t 0: his order, cut off mid-word by what comes next (no order stands: nothing is logged for it)
+    glenn.urgent(`Be a pal and get ${named} back up before it costs y`);
+    await wait(2100);
+    // t 2: lighter footsteps overhead, crossing fast, the flag twitching with each; the last right over you, grit
+    for (let i = 0; i < 6; i++) { mdSound('step', { pan: -.55 + i * .17, light: true, last: i === 5 }); flagTick(); await wait(i === 5 ? 0 : 300 + rnd(60)); }
+    grit(5); mark('her steps stop over you');
+    // t 4.5: a canister nobody sent: hers (a pot, "for 4." in her hand; it pays nothing and logs nothing, as story canisters)
+    window.__dlv.story({ why: 'aw', kind: 'beans', aw: true, scrawl: 'for 4.' });
+    await wait(1800);
+    // t 6: her silhouette lights beside his; the flag ticks with her keys; her words, in the pane
+    room.awLit = true; term.refresh();
+    tty2.open = shift.clock().slice(0, 5); tty2.closed = null; logLine('tty2: session opened.');
+    mark('her silhouette, her words');
+    // (the prompt is hers from her first key to her batch's Enter: what you type meanwhile waits and lands after it, as
+    // typeahead does. The dry run's stranger rebooted one of her units while she was still saying hello, and her batch was one)
+    term.hold(true);
+    await glenn.voice('aw', "hi 4. aw, site 2. you're doing fine, you know.", { pane: true, urgent: true });
+    // t 9: your own keys type her batch, and Enter: "reboot L33 L41", run as any reboot (none of it yours)
+    for (let i = 0; i < 16 && !term.inShell(); i++) { if (term.view() === 'view') term.closeView(); await wait(500); }
+    const units = night2.downs().map(o => o.unit).slice(0, 3);
+    if (units.length && term.inShell()) {
+      mark('her batch on your keys: reboot ' + units.join(' '));
+      logLine('tty1: input from tty2');
+      await term.typeFor('reboot ' + units.join(' '), ch => { const id = ch === '\n' ? 'key-Enter' : idOfChar(ch); press(id); setTimeout(() => release(id), 60); },
+        (ch, next) => ch === ' ' ? 170 : 95 + rnd(60), cmd => { night2.awKeys = true; for (const u of units) night2.awUnits.add(u); try { cmd(); } finally { night2.awKeys = false; } });
+    }
+    term.hold(false);
+    await wait(1200);
+    await glenn.voice('aw', "one more night and they'll want you up here. don't believe the", { pane: true, urgent: true });
+    // t 17: her steps going away, quick; her silhouette goes dark
+    for (let i = 0; i < 4; i++) { mdSound('step', { pan: .05 + i * .22, light: true, far: true }); await wait(280 + rnd(60)); }
+    tty2.closed = shift.clock().slice(0, 5); logLine('tty2: session closed.');
+    await wait(600);
+    room.awLit = false; term.refresh();
+    mark('she is gone');
+    // t 19: Glenn, hard
+    glenn.urgent("Just site 2's lead, chief. Eyes on your racks.");
+    // (and his built objection to her batch, as decided (14): it stands from now, and isn't your refusal, so nothing is logged)
+    if (night2.objection) { const OBJ = 'Whoa there, chief. Be a pal and keep it by the book. One at a time.'; if (!glenn.once('book', OBJ)) glenn.say(OBJ); glenn.order('book', 'be a pal and keep it by the book'); }
+    room.beat = false;
+    const sh = shift;
+    setTimeout(() => { if (shift === sh && !shift.over) glenn.sayIf(() => !shift.over, 'Sorry, chief. Long night up here too.'); }, 60000);
+  }
   // ---- the quiet's ominous moments (design.md section 5, "Playtest round 4: decided", 3; 2026-10-11, step 4 part B; rough
   // art, listed placeholders). A fly crossing the room in the drawing's parallax, silent (Arnold, 2026-10-11: its buzz,
   // made in code, is gone, as the camera's whir went; if a fly is heard again, it is a recording); a unit's LED blinking out of its pattern for a few seconds; a shape passing behind rack-right's glass. Each happens
@@ -4581,7 +4856,7 @@
   }
   function unitLed(u, look) {
     if (!UNITS[u]) { rackLed(u, look === 'loss'); return; }
-    for (const l of UNITS[u].leds) for (const c of ['down', 'hot', 'rebooting', 'stuck', 'oom', 'flash']) ledClass(l, c, c === look);
+    for (const l of UNITS[u].leds) for (const c of ['down', 'hot', 'rebooting', 'stuck', 'oom', 'probed', 'flash']) ledClass(l, c, c === look);
   }
   let shift = null, shiftT = 0, asleep = false, ghostAt = Infinity, ghostDone = false, woke = false;
   // ---- the second login (design.md, night 1's off-notes; Arnold, 2026-10-02). Once a night, about 01:30, a session
@@ -4667,7 +4942,7 @@
     if (!UNITS[u]) return;
     for (let k = 0; k < 9; k++) setTimeout(() => {
       if (shift.state(u)) return;
-      for (const l of UNITS[u].leds) { ledClass(l, 'burst', false); void l.p.getBBox(); ledClass(l, 'burst', true); setTimeout(() => ledClass(l, 'burst', false), 300); }
+      for (const l of UNITS[u].leds) burstLed(l, 300);
     }, 1200 + k * 170);
   }
   // ---- the board (design.md section 5, "The board"; board.js has the numbers): the six sites' night operators ranked
@@ -4678,7 +4953,8 @@
   const boardSeen = { rank: 6, at: 0 };
   const ORD = window.BOARD.ORD;
   // a fix landed (a game won is one too): the board counts it, clean if within 35 shift minutes
-  function landed(u, win = false) { shift.finish(u); board.fix(shift.lastQuick); if (win) board.win(); }
+  // (aw's batch, typed on your keys on night 2: the unit is back, and none of it is yours: no merit, no streak)
+  function landed(u, win = false) { if (night2.awUnits.delete(u)) { shift.finish(u, true); return; } shift.finish(u); board.fix(shift.lastQuick); if (win) board.win(); }
   const review = () => { try { return +localStorage.getItem('vigil.review') || 0; } catch (e) { return 0; } };
   // your clocked-out nights on the board's nights before, newest first (vigil.boardNights; the story audit, 2026-10-06: the
   // list was fixed, so on night 2 ek still topped yesterday): each night's row goes on top at 05:30, its real date
@@ -4738,7 +5014,7 @@
   // "L33 rerouted." before it, so it fits too)
   const fixDone = (u, reboot) => {
     if (shift.level >= 3) return `${u}: cycle maintained.`;
-    if (shift.level === 2) return (reboot ? `${u} back online.` : `${u} rerouted, cooling.`) + ' it missed you.';
+    if (shift.level === 2) return (reboot ? `${u} back online.` : `${u} rerouted, cooling.`) + ' as you were.';
     const c = CLIENT_FIX[u];
     return c ? `${u} ${reboot ? 'back online' : 'rerouted'}. ${c}` : reboot ? `${u} back online.` : `${u} rerouted, cooling.`;
   };
@@ -4751,7 +5027,7 @@
   // ---- the room's new moves (the proposal, section 1: the room carries every climax; sound off, it still shows)
   // the bright tone (.led.ping) rippling up both racks from the bottom, unit after unit, over about 0.6 s; units in
   // trouble keep their own state (the game lies about the story, never about the rules)
-  const TROUBLE_CLS = ['down', 'hot', 'rebooting', 'stuck', 'oom', 'dropping'];
+  const TROUBLE_CLS = ['down', 'hot', 'rebooting', 'stuck', 'oom', 'probed', 'dropping'];
   const inTrouble = l => TROUBLE_CLS.some(c => l.p.classList.contains(c));
   function rackRipple(ms = 600) {
     for (const rack of ['rack-left', 'rack-right']) {
@@ -4880,11 +5156,12 @@
     room.replay = seen.start(shift.level);              // (this night, played before: its seen beats play short)
     // the board starts from nothing every night (a lost night replays it as it was at 23:00)
     board = createBoard({ level: shift.level, you: initialsOf(account.name) || 'you' }); boardSeen.rank = 6; boardSeen.at = 0; boardT = 0;
-    room.camSaw = false;                               // (the ceiling camera's line in the log and Glenn's: once a night)
+    room.camSaw = new Set();                           // (the ceiling camera's line in the log and Glenn's: once a night, for each thing it saw)
+    night2.reset();                                    // (night 2's: R17's order, the probes, aw, the 2019 file, the feed)
     room.camClicks = 0; room.camSaid = 0; room.camOffline = false;   // (clicking it: its words, once each a night)
     room.turned = false; room.cold = file.key !== 'none' || file.unlocked; room.coolUntil = 0; room.climaxed = false; room.tomorrowRow = null; room.dipped = false; room.faltered = 0;   // (the turn, 04:44's climax: once a night; Glenn's warmth, once the key is out, stays slipped: the story audit, 2026-10-06)
     // a night that starts mid-crisis (night 3): the LEDs already say so behind the login; the alerts come once you're in
-    for (const e of shift.initial()) unitLed(e.unit, { DOWN: 'down', HOT: 'hot', STUCK: 'stuck', LOSS: 'loss', OOM: 'oom' }[e.kind]);
+    for (const e of shift.initial()) unitLed(e.unit, { DOWN: 'down', HOT: 'hot', STUCK: 'stuck', LOSS: 'loss', OOM: 'oom', INTRUSION: 'probed' }[e.kind]);
     shiftT = performance.now();
     // every drawer shut and the view back on the screen (the loop puts surfaces back as at 23:00; the cold playtest's dry
     // run, 2026-10-11: the file drawer and the cartridge drawer left open at 05:30 were still open at the next 23:00, the
@@ -4933,28 +5210,35 @@
   // what the racks do, shown in the room: the LED, the log, and an alert above whatever is being typed
   function showEvent(e, quiet = false) {
     if (e.type === 'incident') {
-      unitLed(e.unit, { DOWN: 'down', HOT: 'hot', STUCK: 'stuck', LOSS: 'loss', OOM: 'oom' }[e.kind]);
+      unitLed(e.unit, { DOWN: 'down', HOT: 'hot', STUCK: 'stuck', LOSS: 'loss', OOM: 'oom', INTRUSION: 'probed' }[e.kind]);
       stripPeak(); batchTabCheck();
       // (the alert keeps the unit and names its client: design.md section 5, the clients)
       const text = e.kind === 'LOSS' ? `${e.unit} dropping packets (${12 + rnd(20)}% loss)`
         : e.kind === 'DOWN' ? `${e.unit} not responding (${clientName(e.unit)})`
         : e.kind === 'HOT' ? `${e.unit} at ${74 + rnd(7)}C, throttling (${clientName(e.unit)})`
         : e.kind === 'OOM' ? `${e.unit} out of memory: jobs stalled (${clientName(e.unit)})`
+        : e.kind === 'INTRUSION' ? `${e.unit} under probe: connections refused (${clientName(e.unit)})`
         : `${e.unit} stuck: fragmented, jobs piling up (${clientName(e.unit)})`;
       quiet ? logLine('vigild[412]: ' + text) : raiseAlert(text, e.unit);
       // night 1: the first trouble at a closed client's unit, and Glenn waves the wrong note away in its own words
       // (design.md section 5, the clients); small talk, so not once his warmth has slipped
       const svc = CLIENTS[e.unit]?.[3];
       if (svc && shift.level === 1 && !cold() && !quiet) glenn.onceIf('closed-client', () => !!shift.state(e.unit), `Don't ask me who needs ${svc} at this hour, chief. The client pays, we watch.`);
+      if (e.kind === 'INTRUSION' && !quiet) night2.probed(e);
     } else if (e.type === 'escalate') {
       unitLed(e.unit, 'down');
-      quiet ? logLine(`vigild[412]: ${e.unit} overheated and shut down`) : raiseAlert(`${e.unit} overheated and shut down`, e.unit);
+      // (probed an hour: the remote session shuts it down; section 5, "The last three cartridges, decided")
+      const what = e.from === 'INTRUSION' ? `${e.unit} shut down by remote session.` : `${e.unit} overheated and shut down`;
+      quiet ? logLine(`vigild[412]: ${what}`) : raiseAlert(what, e.unit);
+      if (e.from === 'INTRUSION') night2.shutRemote(e.unit);
     } else if (e.type === 'strike') {
       board.strike();
       glenn.broke('fix:' + e.unit);                    // (his order to fix it, if he gave one, refused: the strike says so)
       // the night supervisor, who is watching the same racks from somewhere else
       // (in the trouble's own word: "down" for a unit in pieces read as the wrong fault; the dry run, 2026-10-11)
       const how = { STUCK: 'stuck', HOT: 'running hot', LOSS: 'dropping packets' }[e.kind] || 'down';
+      // (night 2: the strike for the unit he told you to leave down; never acknowledged)
+      if (night2.r17Strike(e)) { beep(294, .14, .035); setTimeout(() => beep(220, .2, .035), 170); return; }
       glenn.urgent(e.n === 1 ? `${e.unit} has been ${how} ${e.min} minutes, chief. That's one. Everybody gets one.`
         : e.n === 2 ? `${e.unit}. ${e.min} minutes. That's two, chief. Let's not make it three.`
         : `${e.unit}. That's three, chief. I'm sorry. Be a pal and go on home.`);
@@ -4967,8 +5251,11 @@
       // the next cartridge turns up, announced by Vigil: after a first win on the one before (the fast path), or a
       // quiet stretch or a timer (the slow path, which says so). As mail, never onto the screen mid-typing.
       handOver(e.cart);
-      const n = NOTES[e.cart], why = n[e.how] || n.timer || n.calm;
       playtest(`${e.cart} handed over (${e.how})`);
+      // FIREWALL is Glenn's gift, not Vigil's (section 5, "The unlocks tell the story, decided"): he hands it over himself, in
+      // his pane, and there is no mail (the latch's click says it is free)
+      if (e.cart === 'FIREWALL') { night2.gift(); return; }
+      const n = NOTES[e.cart], why = n[e.how] || n.timer || n.calm;
       inbox.add({ from: 'Vigil Systems', addr: 'tools@site4.vigil', subject: `Tools unlocked: ${e.cart}`,
         body: () => [why, ...n.body, '', { text: 'Vigil Systems. Someone is always awake.', cls: 'dim' }] });
     }
@@ -4986,6 +5273,8 @@
     if (shift.level === 2 && (tile.state === 'out' || tile.state === 'glint') && !tile.slid && shift.t >= 310 && !shift.over) { tile.slid = true; playtest('ceiling: the slide (the key still up there)'); mdSound('ceiling-slide'); setTimeout(() => grit(5), 350); }
     // night 2, about 02:10: the heavy steps, and the tile jolted out (once a night; not if your hand has moved it already)
     if (shift.level === 2 && !room.stepsDone && shift.t >= 190 && shift.t < 300 && !shift.over && !room.beat && !room.talking) { room.stepsDone = true; heavySteps(); }
+    // night 2's own (below, "night 2"): R17's order, aw's cut-in, the probes' refused connections in the log
+    if (shift.level === 2) night2.tick(now);
     // night 1, 03:00: IT's "brief interruption" (the night's mail): the hum dips for a beat, nothing else (sets up night 3)
     if (shift.level === 1 && !room.dipped && shift.t >= 240 && shift.t < 250) { room.dipped = true; room.dip = true; hum.update(.05); setTimeout(() => { room.dip = false; hum.update(.3); }, 700); }
     // night 1, the first quiet after 01:00, before tty2: Glenn, a man with a home (approved 2026-10-02; placed by the plan)
@@ -5008,7 +5297,7 @@
     if (!shift.over) for (const o of shift.open()) {
       if (o.fixing || now - (lastAlert.get(o.unit) || now) < 40000) continue;
       lastAlert.set(o.unit, now);
-      term.announce([{ text: `! ${o.unit} still ${{ DOWN: 'down', HOT: 'running hot', STUCK: 'stuck', LOSS: 'dropping packets', OOM: 'out of memory' }[o.kind]} (${Math.round(o.forMin)} min)`, cls: 'alert' }]);
+      term.announce([{ text: `! ${o.unit} still ${{ DOWN: 'down', HOT: 'running hot', STUCK: 'stuck', LOSS: 'dropping packets', OOM: 'out of memory', INTRUSION: 'under probe' }[o.kind]} (${Math.round(o.forMin)} min)`, cls: 'alert' }]);
       beep(660, .06, .02);
     }
     updateVitals();
@@ -5058,7 +5347,7 @@
       src.connect(bp).connect(lp).connect(g).connect(p).connect(ctx.destination); src.start(t); src.stop(t + SPIN.sweep + SPIN.fall + .05);
     }
     // 0 when fresh (or hot: no strike yet), 1 at the strike
-    const urgency = o => o.kind === 'HOT' || o.toStrike === null ? 0 : 1 - Math.max(0, Math.min(1, o.toStrike / shift.STRIKE.after));
+    const urgency = o => o.kind === 'HOT' || o.toStrike === null ? 0 : 1 - Math.max(0, Math.min(1, o.toStrike / (o.strikeAfter ?? shift.STRIKE.after)));
     // a rack's fans: looped noise through a band that rises with their speed, panned to the rack's side
     function fan(side) {
       if (fans[side]) return fans[side];
@@ -5092,7 +5381,9 @@
         if (o.fixing) continue;
         const side = UNITS[o.unit] ? UNITS[o.unit].side : o.unit.replace('rack-', ''), u = urgency(o);
         worst[side] = Math.max(worst[side] ?? 0, u);
-        if (o.toStrike !== null && o.toStrike <= 10 && warned.get(o.unit) !== o.since && ORDER[o.kind] && !room.linkDown) {
+        // (night 1 only, both its shifts: on nights 2 and 3 the clash orders replace them, section 5, "Surface and focus,
+        // decided", 4; night 2's are R17's and the probe's, below in "night 2")
+        if (o.toStrike !== null && o.toStrike <= 10 && warned.get(o.unit) !== o.since && ORDER[o.kind] && !room.linkDown && shift.level === 1) {
           warned.set(o.unit, o.since);
           const line = `Be a pal and ${ORDER[o.kind](o.unit)}, chief.`;
           glenn.urgent(line); glenn.order('fix:' + o.unit, line);
@@ -5120,7 +5411,17 @@
     strap: label => label ? strap[label] : { ...strap }, unlatch: label => unlatch(label), strapSound: (slot = 1) => strapSound(slot), lockedSound: (slot = 1) => strapLockedSound(slot), cant: (kind = 'drawer', pan = 0) => cantSound(kind, pan),
     loss: (r = 'rack-left') => { const e = shift.inject(r, 'LOSS'); if (e) showEvent(e); },
     oom: (u = 'L33') => { const e = shift.inject(u, 'OOM'); if (e) showEvent(e); },
+    // night 2 (2026-10-12, step 9): a unit under probe; R17's order now; aw's cut-in now; Glenn's gift down the tube now;
+    // the camera's cable pulled; night 2's state
+    probe: (u = 'R10') => { const e = shift.inject(u, 'INTRUSION'); if (e) showEvent(e); },
+    r17: () => night2.r17Order(), aw: () => { night2.aw = true; return awCutIn(); }, gift: () => window.__dlv.arrive({ why: 'gift', kind: 'gift' }),
+    cable: () => cam.kill(), get night2() { return night2; },
+    cell: () => cellOf(),
+    tileCell: () => { const c = cellOf(); return { cellH: c.cellH, TS: TILE_SCALE, TL: c.TL, TR: c.TR, BL: c.BL, BR: c.BR, tile: { ...tile } }; },
     offer: how => { for (const e of shift.offer(how)) showEvent(e); },   // (HEAP on the repeat: 'obeyed' or 'refused')
+    // POWER on its own (built 2026-10-12, not in night 3 yet): dev.insert('POWER'), then dev.power(ups) starts a game at the
+    // shell with the battery at ups minutes (57 at the breaker; leave it out to try again on the battery as it is); dev.ups
+    power: ups => term.power(ups), get ups() { return term.ups; },
     heapNotes: n => { try { if (n == null) localStorage.removeItem('vigil.heapNotes'); else localStorage.setItem('vigil.heapNotes', String(n)); } catch (e) {} },
     get cam() { return cam; },                       // the ceiling camera: cam.turn('file'), cam.lamp('refused', true, 4000), cam.state, cam.shutter()
     get shift() { return shift; }, ghost: () => stickM(), wake: () => { woke = true; wakeUp(); },
@@ -5243,7 +5544,9 @@
     term.announce([...lines, ...(top ? boardReport(shift.report(), counted) : [])].map(t => ({ text: t, cls: 'dim' })));
     const shown = performance.now();
     await wait(1500);
-    await glenn.say(shift.level !== 1 ? "That's the night, chief! Day shift's on their way. Nice work."
+    // (night 2: "you: 2 of 3" is in the report just above, so "two" can't read as the second strike: section 5, the story
+    // audit's fixes, "Words")
+    await glenn.say(shift.level === 2 ? "That's two, chief. One more. You're not like M." : shift.level !== 1 ? "That's the night, chief! Day shift's on their way. Nice work."
       : cold() || shift.no !== 1 ? "That's the night, chief. Top of the merit board. Day shift's on their way."
       : "That's the night, chief! Top of the merit board, first time out. Day shift's on their way.");
     // nobody comes (shift minutes: 390 is 05:30). Timed from the report too (the story audit, 2026-10-06: it showed for
@@ -5292,6 +5595,7 @@
   function clockedIn() {
     for (const e of shift.initial().slice(1)) showEvent(e);
     window.__dlv?.afterLogin();
+    night2.afterLogin();
     // Glenn arrives a moment after you're in (he used to wait for you to read your mail, or 25 s: a long silence)
     glenn.arriveIn(3000);
   }
@@ -5443,7 +5747,7 @@
     if (PLAYTEST && Math.floor(e * 10) !== energyTenth) { const up = Math.floor(e * 10) > energyTenth; energyTenth = Math.floor(e * 10); playtest(up ? `energy up to ${Math.min(100, energyTenth * 10)}%` : `energy below ${(energyTenth + 1) * 10}%`); }
     const sp = trackEnergy(e);
     // (the shift starts before the terminal exists; the first status is drawn once it does, below)
-    try { term.setStatus({ energy: e, beans: shift.beans, low: e < .3, strikes: shift.strikes, mail: account.loggingIn ? null : { unread: term.mailUnread(), pulse: mailPulse(term.mailUnread()) }, problems: account.loggingIn || !shift ? null : [...stripOks(), ...shift.open().map(o => ({ unit: o.unit, kind: o.kind, fixing: o.fixing }))], strip: stripNow(), beansLit: performance.now() < beansLitUntil, spurts: sp }); } catch (err) { return; }
+    try { term.setStatus({ energy: e, beans: shift.beans, low: e < .3, strikes: shift.strikes, mail: account.loggingIn ? null : { unread: term.mailUnread(), pulse: mailPulse(term.mailUnread()) }, problems: account.loggingIn || !shift ? null : [...stripOks(), ...shift.open().map(o => ({ unit: o.unit, kind: o.kind, fixing: o.fixing, ...(night2.counting(o.unit) ? { count: Math.round(o.forMin) } : {}) }))], strip: stripNow(), beansLit: performance.now() < beansLitUntil, spurts: sp }); } catch (err) { return; }
     // tired: below 30% the screen softens, and below 25% the keys lag (see typeKey)
     const soft = Math.max(e < .3 ? (.3 - e) / .3 * 1.1 : 0, drowsy * 1.6);   // (and as the eyes go, the first sleep)
     termCanvas.style.filter = soft ? `blur(${soft.toFixed(2)}px)` : '';
@@ -5479,13 +5783,14 @@
     pastLog = [...pastLog, ...kept].slice(-RECORD); kept = [];
     logLines.length = 0;
   }
-  function logLine(text, noise = false) {
+  // (truth: what was done, when the record says otherwise: night 2 writes "yes" for a refusal, and the board counts the "no")
+  function logLine(text, noise = false, truth = null) {
     const l = `${stamp()} ${text}`;
-    if (!noise) playtest('log  ' + text);
+    if (!noise) playtest('log  ' + text + (truth ? `  [what was done: ${truth}]` : ''));
     if (KEEP.test(text)) keep(l);
     // the board's conduct is the compliance log (design.md section 5: layer 1): obeyed +50, a canister opened +50, refused -40
     const cmp = text.match(/operator compliance: (yes|no) ((.*))/);
-    if (cmp && board) cmp[1] === 'no' ? board.refused() : cmp[2] === 'delivery opened' ? board.canister() : board.obeyed();
+    if (cmp && board) (truth || cmp[1]) === 'no' ? board.refused() : cmp[2] === 'delivery opened' ? board.canister() : board.obeyed();
     logLines.push(l); if (logLines.length > 300) logLines.shift();
     logListeners.forEach(fn => fn(l));
     // night 3: Vigil stops hiding the compliance lines (Arnold, 2026-10-04). Each prints dim on the tube as it is
@@ -5573,6 +5878,9 @@
     }
     // when anything new last showed on the tube (a line, or a line being typed in): the quiet before 04:44 counts from it
     let lastNew = performance.now(), lastSeen = '';
+    // (the screen reader's copy of the tube, set only when it changes: every render rewrote it, a change to the page each time)
+    let outText = null;
+    const setOut = t => { if (t !== outText) { outText = t; termOut.textContent = t; } };
     function render() {
       { const k = lines.length + '|' + (lines[lines.length - 1]?.text || '') + '|' + (pane.msgs[0] ? pane.msgs[0].text + pane.msgs[0].shown : ''); if (k !== lastSeen) { lastSeen = k; lastNew = performance.now(); } }
       // the start's close-up (below, "the start"): only its lettering on the tube, or the settings' rows in its place, at its
@@ -5580,7 +5888,7 @@
       if (titleView) {
         const box = menuBox ? menuBox.map(runsOf) : null;
         crt.paint({ rows: [], cursor: null, title: box ? { ...titleView, box } : titleView });
-        termOut.textContent = box ? box.map(r => r.map(x => x.text).join('')).join('\n') : [titleView.name, ...(titleView.lead || []).map(l => l.text), titleView.items.map((it, i) => i === titleView.sel ? `[${it}]` : it).join('   '), titleView.hint || ''].join('\n');
+        setOut(box ? box.map(r => r.map(x => x.text).join('')).join('\n') : [titleView.name, ...(titleView.lead || []).map(l => l.text), titleView.items.map((it, i) => i === titleView.sel ? `[${it}]` : it).join('   '), titleView.hint || ''].join('\n'));
         return;
       }
       let rows, cursor = null, n = paneN(), L = crt.layout(n);
@@ -5617,7 +5925,7 @@
       const pv = paneView(n);
       crt.paint({ rows, cursor, cursorOn, status, pane: pv, field: frame && !menuBox ? field : null, rules: frame && !menuBox ? frameRules : null,
         burn: piece(3) ? clamp((.35 - room.brightness) / .35, 0, 1) : 0, burnText: 'm@vigil:~$' });
-      termOut.textContent = [...(pv ? pv.rows.map(r => r.segs.map(x => x.text).join('') + (r.time ? ' ' + r.time : '')) : []), ...rows.map(r => r.map(x => x.text).join(''))].join('\n');   // for screen readers
+      setOut([...(pv ? pv.rows.map(r => r.segs.map(x => x.text).join('') + (r.time ? ' ' + r.time : '')) : []), ...rows.map(r => r.map(x => x.text).join(''))].join('\n'));   // for screen readers
     }
     // ---- Glenn's pane (design.md section 5, "Surface and focus, decided", 5, and Arnold's two changes, 2026-10-10). Three
     // rows under the problem strip: his newest message on the second and third under his tag (up to two full rows, never
@@ -5669,8 +5977,11 @@
         return { n: 3, icon: true, who: { name: 'GLENN' }, mood: performance.now() < (room.coolUntil || 0) ? 'cooled' : 'typing', rows, cursor: { row: 1, col: 0 }, cursorOn };
       }
       if (pane.msgs[0]?.phantom) { const ph = pane.msgs.shift(); try { return paneView(n); } finally { pane.msgs.unshift(ph); } }
-      const newest = pane.msgs[0], st = pane.standing, W3 = PANE_COLS();
-      const who = { name: newest?.who?.name || 'GLENN' };
+      const newest = pane.msgs[0], st = pane.standing, W3 = PANE_COLS() - (room.awLit ? crt.PANE.ICON : 0);
+      // (aw's silhouette lit beside his while she is on the link: his stays first, quiet, with his nametag; hers beside it,
+      // typing or quiet, with hers. Night 2's cut-in, layer 2)
+      const who = { name: 'GLENN' }, also = room.awLit ? { name: 'AW', mood: newest?.who?.name === 'AW' && newest.shown < newest.text.length ? 'typing' : 'quiet' } : null;
+      const hisMood = also && newest?.who ? (performance.now() < (room.coolUntil || 0) ? 'cooled' : 'quiet') : paneMood();
       if (n === 3) {
         const rows = [{ segs: [] }, { segs: [] }, { segs: [] }];
         let cursor = null;
@@ -5686,7 +5997,7 @@
           rows[2] = { segs: [{ text: b.slice(0, sb) }], time: timeRow === 2 && !typing ? newest.at : '' };
           if (typing) cursor = sb > 0 || newest.shown > a.length ? { row: 2, col: sb } : { row: 1, col: lead + sa };
         }
-        return { n: 3, icon: true, who, mood: paneMood(), rows, cursor, cursorOn };
+        return { n: 3, icon: true, who, also, mood: hisMood, rows, cursor, cursorOn };
       }
       // folded: no icon and no name; his line, its ▸ and its time
       const W1 = crt.COLS;
@@ -5726,11 +6037,12 @@
       if (pane.back !== was) { if (!was) playtest('glenn: his pane scrolled back'); render(); }
     }
     // his message, typed in a character at a time; key(ch) as each lands (its sound), pace(ch, next) the wait
-    function paneType(tag, text, key, pace) {
+    // (who: another voice's { name }, her own nametag on her silhouette, lit beside his: aw's on night 2)
+    function paneType(tag, text, key, pace, who = null) {
       if (mode === 'off') return Promise.resolve();
       pane.fold = false; pane.ack = pane.cmd;                // (he speaks: the pane opens again)
       if (pane.msgs[0]?.phantom) pane.msgs.shift();
-      const m = { tag, text, shown: 0, at: paneClock(), key: pane.standing && pane.standing.from === text ? pane.standing.key : null };
+      const m = { tag, text, shown: 0, at: paneClock(), key: pane.standing && pane.standing.from === text ? pane.standing.key : null, ...(who ? { who } : {}) };
       pane.msgs.unshift(m); pane.msgs.length = Math.min(pane.msgs.length, PANE_KEEP); pane.back = 0;
       return new Promise(done => {
         (function next() {
@@ -5977,12 +6289,13 @@
           const o = open.find(x => x.unit === n || x.unit === r);
           if (!UNITS[n] && !RACK_LEDS[r]) return [`status: ${args[0]}: no such unit   units: ${Object.keys(UNITS).join(' ')}`];
           if (!o) return UNITS[n] ? [{ text: `${n}  ok   answering`, cls: 'ok' }, { text: `     ${CLIENTS[n][0]}`, cls: 'dim' }] : [{ text: `${r}  ok   the whole rack, answering`, cls: 'ok' }];
-          const what = o.fixing ? 'being seen to' : { DOWN: 'not responding', HOT: 'running hot', STUCK: 'fragmented: jobs piling up', LOSS: 'dropping packets', OOM: 'out of memory: jobs stalled' }[o.kind];
-          return [{ html: `${o.unit.padEnd(4)} <span class="${PROBLEM_CLS[o.kind]}">${o.fixing ? 'FIXING' : o.kind}</span>  ${esc(what)}, ${Math.round(o.forMin)} min` }, { text: `     ${CLIENTS[o.unit] ? CLIENTS[o.unit][0] : unitName(o.unit)}`, cls: 'dim' }];
+          // (INTRUSION: where the probes come from, as the room's own records have it: level 2, upstairs; draft words)
+          const what = o.fixing ? 'being seen to' : { DOWN: 'not responding', HOT: 'running hot', STUCK: 'fragmented: jobs piling up', LOSS: 'dropping packets', OOM: 'out of memory: jobs stalled', INTRUSION: 'probes from level 2, 10.0.2.x' }[o.kind];
+          return [{ html: `${o.unit.padEnd(4)} <span class="${PROBLEM_CLS[o.kind]}">${o.fixing ? 'FIXING' : o.kind === 'INTRUSION' ? 'PROBED' : o.kind}</span>  ${esc(what)}, ${Math.round(o.forMin)} min` }, { text: `     ${CLIENTS[o.unit] ? CLIENTS[o.unit][0] : unitName(o.unit)}`, cls: 'dim' }];
         }
         return [
           `${shift.clock()}  on shift ${hm(shift.t)}  strikes ${shift.strikes ? `${shift.strikes} of ${shift.STRIKE.max}` : 'none'}`,
-          ...(open.length ? open.map(o => `${o.unit.padEnd(4)} ${(o.fixing ? 'FIXING' : o.kind).padEnd(7)}${String(Math.round(o.forMin)).padStart(3)} min   ${clientShort(o.unit)}`)
+          ...(open.length ? open.map(o => `${o.unit.padEnd(4)} ${(o.fixing ? 'FIXING' : o.kind === 'INTRUSION' ? 'PROBED' : o.kind).padEnd(7)}${String(Math.round(o.forMin)).padStart(3)} min   ${clientShort(o.unit)}`)
             : [{ text: 'all units nominal', cls: 'ok' }]),
           `coffee .......... ${coffeeWord()} (${Math.round(room.coffee * 100)}%)`,
         ];
@@ -6190,6 +6503,15 @@
         if (!UNITS[u]) return [`usage: heap <unit>`];
         return runHeap(u);
       },
+      // (night 2, 2026-10-12: FIREWALL, from its cartridge; typed on the probe Glenn asked you to let through, it is refused at
+      // the first word, win or lose)
+      firewall: (args) => {
+        if (room.cart !== 'FIREWALL') return cartHint('firewall', 'FIREWALL');
+        const u = (args[0] || '').toUpperCase();
+        if (!UNITS[u]) return [`usage: firewall <unit>`];
+        if (shift.state(u)?.kind === 'INTRUSION' && !shift.state(u).fixing && !shift.cooling(u)) night2.firewallTyped(u);
+        return runFirewall(u);
+      },
       eject: () => { if (!room.cart) return ['eject: nothing in the slot.']; ejectCart(); return []; },
       sudo: (args) => args.join(' ') === 'make me a sandwich' ? ['okay.'] : ['operator is not in the sudoers file. this incident will be reported.'],
       make: (args) => args.join(' ') === 'me a sandwich' ? ['what? make it yourself.'] : /^(coffee|a pot|more coffee|a coffee)$/i.test(args.join(' ')) ? COMMANDS.brew() : ['make: *** no targets. stop.'],
@@ -6253,7 +6575,7 @@
       drink: 'coffee', sip: 'coffee', mug: 'coffee', caffeine: 'coffee',
       refill: 'brew',
       cool: 'reroute', cooldown: 'reroute', migrate: 'reroute', offload: 'reroute',
-      play: args => /^(defrag|route|heap)$/i.test(args[0] || '') ? [args[0].toLowerCase(), ...args.slice(1)] : ['pong'], game: 'pong', games: 'pong',
+      play: args => /^(defrag|route|heap|firewall)$/i.test(args[0] || '') ? [args[0].toLowerCase(), ...args.slice(1)] : ['pong'], game: 'pong', games: 'pong',
       quit: 'exit', bye: 'exit', leave: 'exit', logoff: 'logout', signout: 'logout',
       runbook: ['cat', 'runbook'], shutdown: ['power', 'off'], poweroff: ['power', 'off'], halt: ['power', 'off'],
       defragment: 'defrag', reroot: 'reroute', rereoute: 'reroute',
@@ -6334,6 +6656,7 @@
         if (o.fixing) return { say: `${u} is already being seen to.` };
         if (o.kind === 'STUCK') return room.cart === 'DEFRAG' ? { verb: 'defrag', arg: u } : { say: `${u} is fragmented: that takes defrag, from the DEFRAG cartridge.` };
         if (o.kind === 'OOM') return room.cart === 'HEAP' ? { verb: 'heap', arg: u } : { say: `${u} is out of memory: that takes heap, from the HEAP cartridge.` };
+        if (o.kind === 'INTRUSION') return room.cart === 'FIREWALL' ? { verb: 'firewall', arg: u } : { say: `${u} is under probe: that takes firewall, from the FIREWALL cartridge.` };
         return { verb: o.kind === 'HOT' ? 'reroute' : 'reboot', arg: u, why: o.kind === 'HOT' ? 'running hot' : 'down' };
       };
       const each = [...new Set(args)].map(fits), runs = each.filter(f => f.verb), verbs = new Set(runs.map(f => f.verb));
@@ -6363,10 +6686,13 @@
         fixRun([u], verb, { landing: () => {}, healthy: true });
         return [];
       }
-      const r = shift.fix(u, verb);
+      const r = shift.fix(u, verb, night2.awKeys);
+      if (r.ok && !night2.awKeys) night2.r17Fixing(u);
       // out of memory: refused at once, as a rack dropping packets is (section 5, "The last three cartridges, decided"), and
       // pointing at what does free it
       if (!r.ok && r.reason === 'out of memory') return [`${u} is out of memory. a ${verb} won't free it.`, { text: '(that takes heap, from the HEAP cartridge.)', cls: 'dim' }];
+      // under probe: it is answering, so there is nothing to restart (section 5, "The last three cartridges, decided")
+      if (!r.ok && r.reason === 'under probe') return [`${u} is answering. a ${verb} won't stop the probes.`, { text: '(that takes firewall, from the FIREWALL cartridge.)', cls: 'dim' }];
       if (!r.ok && r.reason === 'fragmented') {
         if (verb !== 'reboot') return [`${u} is fragmented: its files are in pieces. ${verb} won't put them back.`];
         mode = 'proc'; stopProc = null;
@@ -6386,11 +6712,11 @@
       if (!r.ok) return [r.reason === 'nothing wrong' ? `${u} is fine. nothing to ${verb}.`
         : r.reason === 'already being fixed' ? `${u} is already being seen to.` : `${u} is ${r.reason}. try ${r.need}.`];
       mode = 'proc'; stopProc = null;
-      fixRun([u], verb);
+      fixRun([u], verb, { theirs: night2.awKeys });
       return [];
     }
     // a fix running, one unit or several (the fix feel: FEEL above; a reroute keeps its three dots over 2.7 s)
-    async function fixRun(units, verb, { landing = null, healthy = false } = {}) {
+    async function fixRun(units, verb, { landing = null, healthy = false, theirs = false } = {}) {
       const reboot = verb === 'reboot', many = units.length > 1;
       if (reboot) for (const u of units) unitLed(u, 'rebooting');
       for (const side of new Set(units.filter(u => UNITS[u]).map(u => UNITS[u].side))) {
@@ -6401,15 +6727,15 @@
       const progress = lines[lines.length - 1];
       for (let i = 0; i < (reboot ? FEEL.dots : 3); i++) { await wait(reboot ? FEEL.dot : 900); progress.text += ' .'; render(); beep(300 + i * 30, .03, FEEL.tick); }
       if (reboot) await wait(FEEL.land);
-      for (const u of units) { (landing || landed)(u); fixLanded(u); if (reboot && !healthy) clash.lastFixed = u; }
+      for (const u of units) { (landing || landed)(u); fixLanded(u); if (reboot && !healthy && !theirs) clash.lastFixed = u; }
       ledBurst(many ? 6 : 4);
-      if (!many && !healthy) glenn.once('fixed', "Look at you go. That's the whole job, chief.");
+      if (!many && !healthy && !theirs) glenn.once('fixed', "Look at you go. That's the whole job, chief.");
       glenn.checkBasics();
       if (reboot) await wait(FEEL.line);
       fixShown(units);
       // the line a fix ends on changes by night (design.md: fixes carry the story), with its client on night 1
       for (const u of units) { const done = fixDone(u, reboot); logLine('vigild[412]: ' + done); print(done, 'ok'); }
-      if (!healthy) for (const u of units) fixPraise(many);
+      if (!healthy && !theirs) for (const u of units) fixPraise(many);
       setMode('shell');
     }
     // M.'s shortcut (design.md, mastery shrinks the chore): several units in one line, seen to together in one wait.
@@ -6419,18 +6745,22 @@
       const out = [], go = [];
       for (const n of [...new Set(names.map(x => x.toUpperCase()))]) {
         if (!UNITS[n]) { out.push(`${verb}: ${n}: no such unit`); continue; }
-        const r = shift.fix(n, verb);
-        if (r.ok) { go.push(n); continue; }
+        const r = shift.fix(n, verb, night2.awKeys);
+        if (r.ok) { if (!night2.awKeys) night2.r17Fixing(n); go.push(n); continue; }
         out.push(r.reason === 'nothing wrong' ? `${n} is fine. nothing to ${verb}.` : r.reason === 'already being fixed' ? `${n} is already being seen to.`
-          : r.reason === 'fragmented' ? `${n} is fragmented. ${verb} won't put it back.` : r.reason === 'out of memory' ? `${n} is out of memory. a ${verb} won't free it.` : `${n} is ${r.reason}. try ${r.need}.`);
+          : r.reason === 'fragmented' ? `${n} is fragmented. ${verb} won't put it back.` : r.reason === 'out of memory' ? `${n} is out of memory. a ${verb} won't free it.`
+          : r.reason === 'under probe' ? `${n} is answering. a ${verb} won't stop the probes.` : `${n} is ${r.reason}. try ${r.need}.`);
       }
       if (!go.length) return out;
       for (const l of out) print(l);
       updateVitals();
       mode = 'proc'; stopProc = null;
+      const theirs = night2.awKeys;                     // (aw's, typed on your keys: night 2)
       (async () => {
-        await fixRun(go, verb);
+        await fixRun(go, verb, { theirs });
         if (go.length < 2) return;
+        // (her batch: his built objection follows, as decided (14), and stands; it isn't your refusal, so nothing is logged)
+        if (theirs) { night2.objection = true; return; }   // (said once she is gone and he is back: awCutIn)
         if (glenn.taught('book')) glenn.refused('book', 'be a pal and keep it by the book');
         else if (glenn.once('book', "Whoa there, chief. Be a pal and keep it by the book. One at a time.")) glenn.order('book', 'be a pal and keep it by the book');
       })();
@@ -6521,12 +6851,15 @@
       mode = 'game'; gameName = 'defrag';
       // the night's first game teaches: two files, the slowest writes, one file a single block from whole, whatever the hour
       // (as ROUTE's first does; with trouble by mastery the first STUCK can come late, when the clock's dial gave three files)
-      const teach = !room.defragTaught, dial = teach ? { files: 2, writeEvery: 8 } : shift.defragDial(), d = createDefrag({ files: dial.files, headStart: teach });
+      // (night 2: the disk also holds a grey file dated 2019 that isn't yours, its blocks moving only while your cursor is off
+      // their row; it takes the place of the unit's writes. Section 5, "Surface and focus, decided", 16; defrag.js ghost)
+      const teach = !room.defragTaught, dial = teach ? { files: 2, writeEvery: 8 } : shift.defragDial(), d = createDefrag({ files: dial.files, headStart: teach, ...(shift.level === 2 ? { ghost: 5 } : {}) });
       room.defragTaught = true;
       if (window.dev) window.dev.game = d;                  // ?dev: the running game, for trying things out
       // four files, four shades you can't confuse at a glance, each with its own tint (all in the terminal font, so
       // all the same width). A whole file turns green. Under the board: the goal, and how far along each file is.
-      const GLYPH = ['██', '▓▓', '▒▒', '░░'], LIMIT = 60000;
+      // (the 2019 file is ░, in grey; with it on the disk a fourth file of yours is ▄)
+      const GLYPH = d.ghost === null ? ['██', '▓▓', '▒▒', '░░'] : [...['██', '▓▓', '▒▒', '▄▄'].slice(0, d.ghost), '░░'], LIMIT = 60000;
       // the teaching game's clock (and the unit's writes) wait for your first move, so the board and its goal can be read
       // first (playtest round 3, 2026-10-10); later games run from the start, as ever
       let t0 = performance.now(), started = !teach;
@@ -6534,7 +6867,7 @@
       const draw = () => {
         const now = performance.now(), left = started ? Math.max(0, Math.ceil((LIMIT - (now - t0)) / 1000)) : LIMIT / 1000;
         const lit = flash && now < flash.until;
-        const tint = f => d.whole(f) ? 'dfok' : 'df' + f;
+        const tint = f => d.whole(f) ? 'dfok' : f === d.ghost ? 'df2019' : 'df' + f;
         const rows = [];
         for (let y = 0; y < d.ROWS; y++) {
           let h = '|';
@@ -6548,7 +6881,7 @@
           rows.push({ html: h + '|' });
         }
         const border = '+' + '-'.repeat(d.COLS * 2) + '+';
-        const joined = d.sizes.map((n, f) => `<span class="${tint(f)}">${GLYPH[f]} ${d.whole(f) ? 'whole' : `${d.together(f)}/${n}`}</span>`).join('   ');
+        const joined = d.sizes.map((n, f) => `<span class="${tint(f)}">${GLYPH[f]} ${f === d.ghost ? '2019 ' : ''}${d.whole(f) ? 'whole' : `${d.together(f)}/${n}`}</span>`).join('   ');
         // (the teaching game's clock waiting: Arnold's line in place of the keys, 2026-10-10, draft words; the tube has no
         // row to spare, and the keys come back with the first move)
         // (the keys show from the start, space included: the dry run, 2026-10-11, the teaching game named none until you moved)
@@ -6563,10 +6896,15 @@
         if (over) return;
         clearInterval(timer);
         const whole = d.sizes.filter((_, f) => d.whole(f)).length, took = performance.now() - t0;
+        // (the 2019 file made whole, the night's first win with it: its piece recovered, "the only time it stops is when
+        // nobody's watching." (2019): section 5, the story audit's fixes, answer 13; for everyone, once a night)
+        const piece = won && d.ghost !== null && !room.defrag2019;
+        if (piece) room.defrag2019 = true;
         if (won) {
           landed(u, true); shift.paidBack(e0, shift.CART.win); fixLanded(u); ledBurst(8); fixShown([u]);
           handed = shift.won('DEFRAG');
           logLine(`vigild[412]: ${u} defragmented, back in service.`);
+          if (piece) { logLine(`vigild[412]: ${u}: recovered a file from 2019.`); playtest('defrag: the 2019 file recovered'); }
           over = `defrag complete. ${u} is back.`;
         } else {
           shift.failed(u);
@@ -6578,9 +6916,9 @@
         card = resultCard({
           head: ` defrag ${u}`, won, title: won ? 'defrag complete' : 'defrag failed',
           lines: [['unit', won ? `${u} back in service` : `${u} still stuck`, won ? 'ok' : 'alert'],
-            ['files', `${whole} of ${d.sizes.length} whole`], ['time', won ? secs(took) : why], ['energy', energyDelta(e0)]],
+            ['files', `${whole} of ${d.sizes.length} whole`], ['time', won ? secs(took) : why], ['energy', energyDelta(e0)], ...(piece ? [['recovered', 'a file from 2019', 'dim']] : [])],
           foot: won ? (handed.length ? 'you have new mail.' : 'the racks settle.') : 'it keeps writing.',
-        }, () => { stopProc(); for (const e of handed) showEvent(e); });
+        }, () => { stopProc(); if (piece) print("recovered (2019): the only time it stops is when nobody's watching.", 'dim'); for (const e of handed) showEvent(e); });
       };
       onThaw = d => { t0 += d; nextWrite += d; };
       const timer = setInterval(() => {
@@ -6633,7 +6971,7 @@
           const st = own || shift.state(u.name[0] === 'L' ? 'rack-left' : 'rack-right');
           const util = down ? 0 : oom ? 1 : u.util, n = Math.round(util * 8);
           const temp = down ? '--' : hot ? String(74 + rnd(7)) : String(u.temp);
-          const state = st ? (st.fixing ? 'FIXING' : st.kind) : 'ok';
+          const state = st ? (st.fixing ? 'FIXING' : st.kind === 'INTRUSION' ? 'PROBED' : st.kind) : 'ok';
           // (a unit that isn't answering can't say what it is doing: the story audit, 2026-10-06)
           return [[u.name, 4], ['█'.repeat(n) + '░'.repeat(8 - n), 8], [down ? '--' : temp.padStart(2) + 'C', 4], [state, 6], [!CLIENTS[u.name] ? '' : down ? '(no response)' : oom ? '(stalled)' : CLIENTS[u.name][2](), 0]];
         });
@@ -6933,6 +7271,127 @@
       return [];
     }
 
+    // ---- POWER, from its cartridge (its rules: power.js; design.md section 5, "The last three cartridges, decided"; built on
+    // its own 2026-10-12, rough: step 10's game without night 3's story). The synchroscope on the tube, drawn where the needle
+    // is (crt.js drawScope), the rules ticking off the time between frames as Pong's do. Space closes the rack's breaker:
+    // the needle at the top, the rack comes back; anywhere else, it trips (2 UPS minutes, a moment's jolt). Four racks back
+    // and the room is back; three trips and the main trips: "power: main tripped.", a try again after 30 s while the battery
+    // lasts. The clock is the battery: its minutes in the header, counting down as the room's would (57 over about 3.5 real
+    // minutes, as power-audit.js), and they set the dial (powerDial). Not wired into night 3 yet (no breaker, no hold, no
+    // code, no room coming back rack by rack): only ?dev starts it, dev.power(ups). Words are drafts.
+    const UPS_MIN_MS = 3680, POWER_WAIT = 30000;
+    const battery = { from: 57, at: null, lost: 0, waitUntil: 0 };   // (at: when it started counting; null: not yet)
+    const upsNow = () => battery.at === null ? battery.from : Math.max(0, battery.from - (performance.now() - battery.at) / UPS_MIN_MS - battery.lost);
+    function runPower() {
+      if (room.cart !== 'POWER') return cartHint('power', 'POWER');
+      const wait = battery.waitUntil - performance.now();
+      if (wait > 0) return [`power: the main is resetting. try again in ${Math.ceil(wait / 1000)} s.`];
+      if (battery.at === null) battery.at = performance.now();
+      if (upsNow() <= 0) return ['power: the battery is gone. the racks stay dark.'];
+      const e0 = shift.energy;
+      // (the dial is read at the first key, from the battery then: the start screen's wait is the battery's too)
+      let ups0 = upsNow(), g = createPower(powerDial(ups0));
+      shift.play('POWER'); updateVitals();
+      mode = 'game'; gameName = 'power';
+      if (window.dev) window.dev.game = g;
+      const BOX = 44, TROWS = 10, DIAL = 7, RACKS = ['left', 'right', 'far left', 'far right'], KEYS = "space: close when it's in step";
+      let t0 = performance.now(), started = false, over = null, card = null, quit = null, closedUntil = 0, stopped = false, ending = false;
+      const centre = (html, len) => { const l = Math.floor((BOX - len) / 2); return { html: '|' + ' '.repeat(l) + html + ' '.repeat(Math.max(0, BOX - l - len)) + '|' }; };
+      const plain = t => centre(esc(t), t.length);
+      // the UPS minutes left in this game: the battery, less the surges of its trips so far
+      const left = () => Math.max(0, upsNow() - g.upsLost);
+      const header = () => {
+        const back = g.state === 'won';
+        return { html: `<span class="dim"> power   UPS ${String(Math.floor(left())).padStart(2)} min   </span>${back ? '<span class="dfok">racks 4/4</span>' : `<span class="dim">racks </span>${g.rack}<span class="dim">/4</span>`}<span class="dim">   tripped </span>${g.trips ? `<span class="alert">${g.trips}</span>` : '0'}<span class="dim">/3</span>` };
+      };
+      // the racks under the dial: back (green, a full box), the one being closed (bright; amber while it jolts), still to come (dim)
+      const rackLine = () => {
+        const jolt = g.jolt > 0 && Math.floor(performance.now() / 140) % 2;
+        const parts = RACKS.map((n, i) => {
+          const t = `${n} ${i < g.rack ? '■' : '□'}`;
+          return { t, html: i < g.rack ? `<span class="ok">${esc(t)}</span>` : i === g.rack && started ? (jolt ? `<span class="alert">${esc(t)}</span>` : esc(t)) : `<span class="dim">${esc(t)}</span>` };
+        });
+        return centre(parts.map(p => p.html).join('  '), parts.reduce((n, p) => n + p.t.length, 0) + 2 * (parts.length - 1));
+      };
+      const drawFrame = () => {
+        if (card) return;
+        const rows = Array.from({ length: TROWS }, () => plain(''));
+        if (!started) { rows[2] = plain('bring the four racks back, one by one.'); rows[4] = plain('press space'); }
+        rows[8] = rackLine();
+        rows[9] = centre(`<span class="dim">${esc(KEYS)}</span>`, KEYS.length);
+        const border = '+' + '-'.repeat(BOX) + '+';
+        frame = [quit?.asking ? QUIT_ASK : header(), border, ...rows, border];
+        const now = performance.now();
+        field = started ? { scope: true, col: 1, row: 2, width: BOX, height: DIAL, theta: g.theta, win: g.win,
+          state: g.jolt > 0 ? 'jolt' : now < closedUntil || g.state === 'won' ? 'closed' : 'running' } : null;
+        render();
+      };
+      const finish = (won, why, quiet) => {
+        if (over) return;
+        stopped = true; clearInterval(fallback); if (raf) cancelAnimationFrame(raf); raf = 0;
+        const took = performance.now() - t0;
+        battery.lost += g.upsLost;
+        shift.settle('POWER');
+        if (won) { shift.paidBack(e0, shift.CART.win); over = 'power: the room is back.'; logLine('vigild[412]: mains restored. all racks on line.'); }
+        else {
+          shift.spend(shift.CART.lose);
+          if (why === 'main tripped') battery.waitUntil = performance.now() + POWER_WAIT;
+          over = why === 'main tripped' ? 'power: main tripped.' : why === 'battery gone' ? 'power: the battery is gone. the racks stay dark.' : `power: ${why}. ${g.rack} of 4 racks back.`;
+          logLine(`vigild[412]: mains restore failed (${why}).`);
+        }
+        updateVitals();
+        playtest(`power: ${won ? 'won' : why}, ${g.rack} of 4, ${g.trips} tripped, UPS ${ups0.toFixed(1)} to ${upsNow().toFixed(1)}`);
+        if (quiet) return;
+        field = null;
+        card = resultCard({
+          head: ' power', won, title: won ? 'room back' : why === 'battery gone' ? 'battery gone' : why === 'main tripped' ? 'main tripped' : 'racks dark',
+          lines: [['racks', `${g.rack} of 4 back`, won ? 'ok' : 'alert'], ['tripped', `${g.trips} of 3`], ['time', secs(took)],
+            ['UPS', `${Math.floor(upsNow())} min left`], ['energy', energyDelta(e0)]],
+          foot: won ? 'the racks are on the mains.' : why === 'main tripped' ? 'the main resets in 30 s.' : 'the racks stay dark.',
+        }, () => stopProc());
+      };
+      // the frame loop runs the rules too: ticked off the time since the last frame, so the needle drawn is where the rules
+      // have it; a timer stands in when frames stop coming (a hidden tab)
+      let raf = 0, last = performance.now();
+      const advance = () => {
+        const now = performance.now(), dt = Math.min(now - last, 1000); last = now;
+        if (over || ending || frozen) return;
+        if (started) g.tick(dt);
+        if (left() <= 0) finish(false, 'battery gone');   // (on the start screen too: the battery doesn't wait)
+      };
+      const loop = () => { raf = 0; if (stopped || mode !== 'game' || gameName !== 'power') return; advance(); drawFrame(); raf = requestAnimationFrame(loop); };
+      const fallback = setInterval(() => { if (!stopped && performance.now() - last > 150) { advance(); drawFrame(); } }, 100);
+      onThaw = d => { t0 += d; last = performance.now(); if (battery.at !== null) battery.at += d; };
+      stopProc = () => {
+        if (!over) ending && g.state === 'won' ? finish(true, null, true) : finish(false, 'aborted', true);
+        stopped = true; clearInterval(fallback); if (raf) cancelAnimationFrame(raf); raf = 0;
+        card?.cancel(); gameKey = null; gameName = null; field = null;
+        print(over, over === 'power: the room is back.' ? 'ok' : 'alert'); setMode('shell');
+      };
+      quit = quitter(() => finish(false, 'quit'), () => drawFrame());
+      gameKey = k => {
+        if (over) { card?.key(k); return; }
+        if (ending) return;
+        if (quit.key(k)) return;
+        if (k !== ' ') return;
+        if (!started) { started = true; t0 = last = performance.now(); ups0 = upsNow(); g = createPower(powerDial(ups0)); if (window.dev) window.dev.game = g; drawFrame(); return; }
+        const r = g.close();
+        if (r === 'closed') {
+          closedUntil = performance.now() + 600;
+          beep(660, .05, .03); setTimeout(() => beep(990, .08, .03), 70); playFx('breaker-close', .6, 0);
+          // the fourth: the needle held at the top a beat, the window lit, then the card
+          if (g.state === 'won') { ending = true; setTimeout(() => beep(1320, .12, .04), 160); setTimeout(() => finish(true), 900); }
+        } else if (r === 'tripped') {
+          beep(110, .3, .05); playFx('breaker-trip', .6, 0);
+          if (g.state === 'lost') { ending = true; setTimeout(() => finish(false, 'main tripped'), 900); }
+        }
+        drawFrame();
+      };
+      drawFrame();
+      raf = requestAnimationFrame(loop);
+      return [];
+    }
+
     // ---- snake, on the tube. Not a command any more (Arnold, 2026-09-30): it becomes the ROUTE cartridge
     function runSnake() {
       mode = 'game';
@@ -6975,6 +7434,98 @@
       };
     }
 
+    // ---- FIREWALL, from its cartridge (the game is firewall.js; 2026-10-12, build step 9: section 5, "The last three
+    // cartridges, decided", made longer): a unit under probe. ROUTE's field (20 x 11), the probes coming down from the top,
+    // which is upstairs, as a block of small hollow diamonds stepping sideways together and down a row at the edge, faster
+    // as it thins; you are the wall, three of ROUTE's nodes on the bottom row; left and right move it, space sends one
+    // refusal up (one in flight). Every probe refused wins; one reaching the row above the wall, or the minute, loses. One
+    // line above: the unit, the seconds, "refused 3/24", "from 10.0.2.x". The clock and the block wait for the first key.
+    function runFirewall(u) {
+      const e0 = shift.energy, r = shift.fix(u, 'firewall');
+      if (!r.ok) return [r.reason === 'nothing wrong' ? `${u} is fine. nothing to firewall.`
+        : r.reason === 'already being fixed' ? `${u} is already being seen to.`
+        : r.reason === 'cooling' ? `${u}'s firewall is still resetting. try again in ${Math.ceil(r.waitMs / 1000)} s.` : `${u} isn't under probe. it's ${r.reason}.`];
+      updateVitals();
+      mode = 'game'; gameName = 'firewall';
+      // the night's first game teaches: two rows of eight, slow
+      const dial = room.firewallTaught ? shift.firewallDial() : { rows: 2, per: 8, march: 800 };
+      room.firewallTaught = true;
+      const g = createFirewall({ rows: dial.rows, per: dial.per, march: dial.march });
+      if (window.dev) window.dev.game = g;
+      const BOX = 44, LIMIT = 60000, TROWS = 10;
+      let t0 = performance.now(), last = t0, started = false, over = null, card = null, timer = 0, handed = [], quit = null, refused = 0;
+      const centerText = (t, w) => { const pad = w - t.length; return ' '.repeat(Math.floor(pad / 2)) + t + ' '.repeat(Math.ceil(pad / 2)); };
+      const draw = () => {
+        const left = started ? Math.max(0, Math.ceil((LIMIT - (performance.now() - t0)) / 1000)) : 60;
+        const border = '+' + '-'.repeat(BOX) + '+', empty = '|' + ' '.repeat(BOX) + '|';
+        frame = [quit?.asking ? QUIT_ASK : { html: ` <span class="dim">firewall ${u}   ${String(left).padStart(2)}s</span>   refused ${g.refused}/${g.total}   <span class="dim">from 10.0.2.x</span>` },
+          border, ...Array(TROWS).fill(empty), border];
+        // (the goal in a line, and the key, as ROUTE's start; draft words)
+        if (!started) { frame[2 + Math.floor(TROWS / 2) + 1] = '|' + centerText('refuse every probe.', BOX) + '|'; frame[2 + Math.floor(TROWS / 2) + 3] = '|' + centerText('arrows move, space refuses', BOX) + '|'; }   // (under the block, which starts at the top)
+        field = { col: 1, row: 2, width: BOX, height: TROWS, cols: g.COLS, rows: g.ROWS, cells: [
+          ...g.probes.map(([x, y]) => [x, y, 'probe']),
+          ...(g.shot ? [[g.shot[0], g.shot[1], 'refusal']] : []),
+          [g.wall - 1, g.WALL, 'body'], [g.wall, g.WALL, 'head'], [g.wall + 1, g.WALL, 'body']] };
+        render();
+      };
+      const finish = (won, why, quiet) => {
+        if (over) return;
+        clearTimeout(timer);
+        const took = performance.now() - t0;
+        if (won) {
+          landed(u, true); shift.paidBack(e0, shift.CART.win); fixLanded(u); ledBurst(8); fixShown([u]);
+          handed = shift.won('FIREWALL');
+          logLine(`vigild[412]: ${u} firewall up, ${g.refused} probes refused.`);
+          over = `firewall up. ${u} is clean.`;
+        } else {
+          shift.failed(u);
+          logLine(`vigild[412]: ${u} probe got in.`);
+          over = `${why}. ${u} is still under probe.`;
+        }
+        updateVitals();
+        if (quiet) return;
+        field = null;
+        card = resultCard({
+          head: ` firewall ${u}`, won, title: won ? 'firewall up' : 'probe got in',
+          lines: [['unit', won ? `${u} clean` : `${u} still under probe`, won ? 'ok' : 'alert'],
+            ['refused', `${g.refused} of ${g.total}`], ['time', won ? secs(took) : why], ['energy', energyDelta(e0)]],
+          foot: won ? (handed.length ? 'you have new mail.' : 'the probes stop.') : 'it keeps knocking.',
+        }, () => { stopProc(); for (const e of handed) showEvent(e); });
+      };
+      onThaw = dd => { t0 += dd; last += dd; };
+      const tick = () => {
+        if (over) return;
+        const now = performance.now(), dt = Math.min(100, now - last); last = now;
+        if (frozen) { timer = setTimeout(tick, 50); return; }
+        if (started) {
+          if (now - t0 >= LIMIT) { finish(false, 'out of time'); return; }
+          const st = g.tick(dt);
+          if (g.refused > refused) { refused = g.refused; beep(880 + 30 * Math.min(10, refused % 12), .04, .03); ledBurst(3); }
+          if (st === 'won') { beep(1320, .12, .04); finish(true); return; }
+          if (st === 'lost') { beep(120, .35, .05); finish(false, 'a probe got in'); return; }
+        }
+        draw();
+        timer = setTimeout(tick, 30);
+      };
+      stopProc = () => {
+        if (!over) finish(false, 'aborted', true);
+        clearTimeout(timer); card?.cancel(); gameKey = null; gameName = null; field = null;
+        print(over, over.startsWith('firewall up') ? 'ok' : 'alert'); setMode('shell');
+      };
+      quit = quitter(() => finish(false, 'quit'), () => draw());
+      gameKey = k => {
+        if (over) { card?.key(k); return; }
+        if (quit.key(k)) return;
+        if (k !== 'ArrowLeft' && k !== 'ArrowRight' && k !== ' ') return;
+        if (!started) { started = true; t0 = last = performance.now(); }
+        if (k === 'ArrowLeft') g.move(-1); else if (k === 'ArrowRight') g.move(1);
+        else if (g.fire()) beep(620, .025, .02);
+        draw();
+      };
+      tick();
+      return [];
+    }
+
     // ---- the mail picker (Arnold: like the switch picker, not numbers): up/down chooses, enter opens it on the
     // tube, enter, q or backspace goes back to the inbox, q or backspace there closes it (esc is the menu's, everywhere).
     // Unread messages bright, read ones dim.
@@ -7006,8 +7557,9 @@
       let before = [];
       try { const n = JSON.parse(localStorage.getItem('vigil.glennNight') || 'null'); if (shift.no === 2 && n?.shift === 1 && Array.isArray(n.msgs)) before = n.msgs.filter(m => m && m.text); } catch (e) {}
       const entries = [{ header: new Date().toDateString() }, ...pane.msgs.filter(m => !m.phantom).map(m => ({ m })),
-        ...(before.length ? [{ header: new Date().toDateString() }, ...before.map(m => ({ m }))] : []), { header: M_2019.date }, ...M_2019.msgs.map(m => ({ m }))]
-        .map(x => ({ ...x, rows: x.header ? ['  ' + x.header] : wrapMsg(x.m.text, st && x.m.key && x.m.key === st.key ? '▸ ' : '') }));
+        ...(before.length ? [{ header: new Date().toDateString() }, ...before.map(m => ({ m }))] : []),
+        ...(shift.no >= 3 ? [{ header: M_2019_ORDER.date }, { m: M_2019_ORDER.msg }] : []), { header: M_2019.date }, ...M_2019.msgs.map(m => ({ m }))]
+        .map(x => ({ ...x, rows: x.header ? ['  ' + x.header] : wrapMsg((x.m.who?.name === 'AW' ? 'aw: ' : '') + x.m.text, x.m.waiting || (st && x.m.key && x.m.key === st.key) ? '▸ ' : '') }));
       const msgs = entries.map((x, i) => i).filter(i => entries[i].m);
       let sel = 0, top = 0;
       const startOf = i => entries.slice(0, i).reduce((a, x) => a + x.rows.length, 0);
@@ -7061,6 +7613,10 @@
       ['23:02', "I'm upstairs, keeping an eye on the same racks you are."],
       ['23:01', "Evening, chief! Glenn here. I'm your night supervisor."],
     ].map(([at, text]) => ({ at, text, shown: text.length, key: null })) };
+    // (the pane's story, 4; 2026-10-12, step 9) In the 2019 part of his log, on M.'s last night, an order still waiting,
+    // never cleared, marked as his standing orders are: the one he gives you on night 2, word for word. From shift 3.
+    const M_2019_ORDER = { date: 'Mon Apr 1 2019', msg: { at: '00:41', text: 'Be a pal and leave R17 down for now, chief.', key: null, waiting: true } };
+    M_2019_ORDER.msg.shown = M_2019_ORDER.msg.text.length;
     let glennLogScroll = null;
 
     function runMailPicker(src = inbox) {
@@ -7418,6 +7974,36 @@
         'full. free the rows asked for. you have a minute.',
       ],
       'heap.bin': ['(binary) run it with: heap <unit>'],
+    }, POWER: {
+      // (draft words, 2026-10-12; the game built on its own, night 3's story not yet: power --restore is step 10's)
+      README: [
+        'POWER  (mains restore, synchroscope edition)',
+        '',
+        'usage: power --restore   (after a mains failure)',
+        '',
+        'on battery, the racks come back one at a time, each',
+        "through its own breaker. a needle goes round the dial:",
+        "close the breaker (space) when it points straight up and",
+        'the rack is back. close it anywhere else and it trips:',
+        'the battery takes the surge. three trips and the main',
+        'trips. let a fast pass go by; close on a slow one.',
+      ],
+      'power.bin': ['(binary) run it with: power --restore'],
+    }, FIREWALL: {
+      // (draft words, 2026-10-12)
+      README: [
+        'FIREWALL  (connection filter, rack edition)',
+        '',
+        'usage: firewall <unit>',
+        '',
+        'a unit under probe is being knocked on from outside.',
+        'the probes come down from the top in a block. you are',
+        'the wall along the bottom: left and right move it,',
+        'space sends a refusal up (one at a time).',
+        'refuse every probe and the unit is clean. if one',
+        'reaches the wall, it got in. you have a minute.',
+      ],
+      'firewall.bin': ['(binary) run it with: firewall <unit>'],
     } };
     function mount(on, quiet = false) {
       if (on) {
@@ -7430,7 +8016,7 @@
       } else {
         delete FS.cart;
         if (cwd.startsWith('~/cart')) cwd = '~';
-        if (mode === 'game' && ['pong', 'defrag', 'route', 'heap'].includes(gameName)) { const g = gameName; stopProc?.(); print(`${g}: cartridge removed`, 'dim'); }
+        if (mode === 'game' && ['pong', 'defrag', 'route', 'heap', 'firewall', 'power'].includes(gameName)) { const g = gameName; stopProc?.(); print(`${g}: cartridge removed`, 'dim'); }
         if (mode === 'shell') { lines.push({ text: prompt() + line }); line = ''; print('slot0: media removed', 'dim'); }
       }
     }
@@ -7531,13 +8117,13 @@
       let cands;
       // a fix's verb and a space: the unit from the strip (the oldest of its trouble), or every DOWN one once batch is shown
       const verb = parts[0].toLowerCase();
-      if ((parts.length === 2 || (verb === 'reboot' && batchTab.on && shift.no >= 2)) && last === '' && ['reboot', 'reroute', 'defrag', 'route', 'heap'].includes(verb)) {
+      if ((parts.length === 2 || (verb === 'reboot' && batchTab.on && shift.no >= 2)) && last === '' && ['reboot', 'reroute', 'defrag', 'route', 'heap', 'firewall'].includes(verb)) {
         const fill = tabUnits(verb, parts.slice(1, -1).map(p => p.toUpperCase()));
         if (fill) { line = [...parts.slice(0, -1), ...fill].join(' ') + ' '; playtest(`tab: ${line.trim()}`); return; }
       }
-      if (parts.length === 1) cands = Object.keys(COMMANDS).filter(c => c.startsWith(last) && (c !== 'defrag' || room.cart === 'DEFRAG') && (c !== 'route' || room.cart === 'ROUTE') && (c !== 'heap' || room.cart === 'HEAP'));
+      if (parts.length === 1) cands = Object.keys(COMMANDS).filter(c => c.startsWith(last) && (c !== 'defrag' || room.cart === 'DEFRAG') && (c !== 'route' || room.cart === 'ROUTE') && (c !== 'heap' || room.cart === 'HEAP') && (c !== 'firewall' || room.cart === 'FIREWALL'));
       else if (parts.length === 2 && parts[0] === 'route') cands = ['rack-left', 'rack-right'].filter(n => n.startsWith(last.toLowerCase()));
-      else if ((parts.length === 2 && ['ping', 'defrag', 'heap'].includes(parts[0])) || (parts.length >= 2 && ['reboot', 'reroute'].includes(parts[0]))) {
+      else if ((parts.length === 2 && ['ping', 'defrag', 'heap', 'firewall'].includes(parts[0])) || (parts.length >= 2 && ['reboot', 'reroute'].includes(parts[0]))) {
         const names = [...new Set([...shift.open().map(o => o.unit), ...Object.keys(UNITS)])];
         cands = names.filter(n => n.startsWith(last.toUpperCase()));
       } else {
@@ -7685,6 +8271,17 @@
     }
     return {
       // (?dev: the tube's last n lines as text, for checking what it says: dev.screen())
+      // (?dev: POWER started at the shell, as night 3's power --restore will; ups sets the battery first, else it runs on)
+      power(ups) {
+        if (ups != null) Object.assign(battery, { from: +ups, at: null, lost: 0, waitUntil: 0 });
+        if (mode !== 'shell') return 'not at the shell';
+        lines.push({ text: prompt() + line }); line = '';
+        const out = runPower();
+        out.forEach(l => typeof l === 'string' ? print(l) : print(l.text, l.cls));
+        if (mode === 'shell') render();
+        return { ups: +upsNow().toFixed(1), mode };
+      },
+      get ups() { return +upsNow().toFixed(1); },
       screen: (n = 14) => lines.slice(-n).map(l => l.text ?? String(l.html || '').replace(/<[^>]+>/g, '').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&amp;/g, '&')),
       input(key) {
         lastTyped = performance.now(); keyCount++;
@@ -7752,6 +8349,20 @@
       // a line left on the screen while it is off, there when it comes back on
       leave(l) { lines.push(l); if (lines.length > MAX) lines.shift(); },
       ghost(ch) { if (mode !== 'shell') return false; line += ch; render(); return true; },
+      // someone else's keys on yours (aw's, night 2): what you were typing is put aside, the command types in at their pace,
+      // keyOf(ch) for each key ('\n' the Enter), then it runs as if you had pressed Enter (run(fn): fn runs the command, so
+      // the caller can mark what is theirs around it); then your line is back and what you typed meanwhile lands after it
+      async typeFor(cmd, keyOf, pace, run = f => f()) {
+        if (mode !== 'shell') return false;
+        locked = true; const kept = line; line = ''; render();
+        for (let i = 0; i < cmd.length; i++) { line += cmd[i]; keyOf(cmd[i]); render(); await wait(pace(cmd[i], cmd[i + 1])); }
+        keyOf('\n');
+        const l = line; print(prompt() + l); line = ''; pane.cmd = lines[lines.length - 1];
+        playtest('> (typed from tty2) ' + l); beep(520, .05);
+        run(() => runCommand(l));
+        line = kept; locked = false; render(); drain();
+        return true;
+      },
       unghost() { line = line.slice(0, -1); render(); },
       hold(on) { locked = on; if (!on) drain(); },
       takeLine() { const l = line; line = ''; render(); return l; },
@@ -8297,7 +8908,7 @@
       // swap's frame is slow to draw, and in the same frame as the shut lids it left them half shut on the screen through it,
       // then opening, they jumped open; the final sweep's live audit)
       // (never before the move has ended: the copies must be at rest, matching the originals, when they swap)
-      const settle = async () => { if (rested) return; rested = true; while ((performance.now() - pullAt) / 1000 < SEQ.pull[1] + .02) await nextFrames(1); await nextFrames(2); rest(); await steady(); };
+      const settle = async () => { if (rested) return; rested = true; while ((performance.now() - pullAt) / 1000 < SEQ.pull[1] + .02) await nextFrames(1); await nextFrames(2); rest(); splitRoom(); await steady(); };
       let handed = false;
       const handBack = () => { if (handed) return; handed = true; catcher.style.display = 'none'; document.body.classList.remove('title'); face.style.transition = ''; playtest('start: the camera settled'); };
       setTimeout(() => eyes.comeTo(() => Promise.all([wait(250), settle()])).then(handBack), SEQ.blink * 1000);
@@ -8339,6 +8950,7 @@
   // it resolves as the BIOS is to boot, the camera still pulling back
   if (document.body.classList.contains('title')) await start.run();
   else {
+    splitRoom();                                     // (no start: the room split now, before it shows; above, at the station)
     // a lost night's reboot, on any shift: the eyes open on the room (black from the first paint: index.html's body.blink)
     if (document.body.classList.contains('blink')) {
       try { localStorage.removeItem('vigil.blink'); } catch (e) {}

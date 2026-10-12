@@ -11,11 +11,16 @@
    pieces, so progress sticks and the pressure is on what is left. The night turns its dial up: more files, and
    writes coming faster. headStart: the night's first game has one file a single block from whole, so the first
    move finishes a file and shows what whole looks like; the unit leaves that file alone so the lesson holds.
+   ghost (night 2; design.md section 5, "Surface and focus, decided", 16, option A; 2026-10-12, build step 9): the disk
+   also holds a file that isn't yours, dated 2019 (its index is `files`, the last of sizes). It takes the place of the
+   unit's anonymous writes, at the same rate: a write moves one of its blocks, never one of yours, and only a block off the
+   row your cursor is on (watched, it freezes). Every file whole wins, as ever, this one with them: made whole, its piece
+   is recovered (and, whole, it is left alone, as any whole file is).
    Pure: the page draws it and runs its clock; defrag-audit.js checks it can be won. */
 (function () {
   const COLS = 24, ROWS = 8, N = COLS * ROWS;
 
-  window.createDefrag = function ({ files = 2, headStart = false, rand = Math.random } = {}) {
+  window.createDefrag = function ({ files = 2, headStart = false, ghost = 0, rand = Math.random } = {}) {
     const cells = new Array(N).fill(null);             // null: free; otherwise a file index
     const sizes = Array.from({ length: files }, () => 5 + Math.floor(rand() * 3));   // 5-7 blocks a file
     const col = i => i % COLS, row = i => Math.floor(i / COLS);
@@ -45,6 +50,13 @@
         place(f, len);
         left -= len;
       }
+    }
+    // the 2019 file: `ghost` blocks, in two or three fragments, placed after yours (so a game without it is as it was)
+    if (ghost) {
+      sizes.push(ghost);
+      let left = ghost;
+      const parts = 2 + Math.floor(rand() * 2);
+      for (let p = 0; p < parts && left > 0; p++) { const len = p === parts - 1 ? left : Math.max(1, Math.round(left / (parts - p))); place(files, len); left -= len; }
     }
     const s = { cursor: 0, held: null, moves: 0 };   // held: the index a block was picked up from
 
@@ -87,14 +99,15 @@
     // and so is the block in your hand (and, in a first game, the file it is teaching with).
     function write() {
       const blocks = [], free = [];
-      for (let i = 0; i < N; i++) { if (cells[i] === null) free.push(i); else if (i !== s.held && !whole(cells[i]) && !(headStart && cells[i] === 0)) blocks.push(i); }
+      // (with the 2019 file: only its blocks move, and only those off the cursor's row)
+      for (let i = 0; i < N; i++) { if (cells[i] === null) free.push(i); else if (i !== s.held && (ghost ? cells[i] === files && !whole(files) && row(i) !== row(s.cursor) : !whole(cells[i]) && !(headStart && cells[i] === 0))) blocks.push(i); }
       if (!blocks.length || !free.length) return null;
       const from = blocks[Math.floor(rand() * blocks.length)], to = free[Math.floor(rand() * free.length)];
       cells[to] = cells[from]; cells[from] = null;
       return { from, to };
     }
     return {
-      COLS, ROWS, cells, sizes, move, act, write, won, whole, runs, together,
+      COLS, ROWS, cells, sizes, ghost: ghost ? files : null, move, act, write, won, whole, runs, together,
       get cursor() { return s.cursor; }, get held() { return s.held; }, get moves() { return s.moves; },
     };
   };

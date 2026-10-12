@@ -304,7 +304,9 @@
   // grey between the print and the rules); a misrouted memo ('memo') and a timesheet ('timesheet'), papers of their own
   // that come with a slip and are held up behind it, the timesheet clipped to it.
   const CARBON = ['REQUEST: 1 BAG · REASON: can\'t stay awake', 'TO: m · 2019-04-01'];
-  function slip(kind, { note = [], to = '', aw = false, no = 412, struck = false, carbon = false, date = '' } = {}, place = { cx: 720, cy: 470, k: 1 }) {
+  // (scrawl: a few words written on it by hand, beside the typing: aw's "for 4." on her canister's issue slip, night 2, in her
+  // own round hand, Indie Flower, as on her letter; 2026-10-12, step 9)
+  function slip(kind, { note = [], to = '', aw = false, no = 412, struck = false, carbon = false, date = '', scrawl = '' } = {}, place = { cx: 720, cy: 470, k: 1 }) {
     const { w, h } = SLIP, a = (place.rot ?? SLIP.rot) * Math.PI / 180, c = Math.cos(a) * place.k, si = Math.sin(a) * place.k;
     const P2 = (x, y) => [place.cx + (x - w / 2) * c - (y - h / 2) * si, place.cy + (x - w / 2) * si + (y - h / 2) * c];
     const m = [c, si, -si, c, ...P2(0, 0)].map(v => v.toFixed(4)).join(' ');
@@ -327,6 +329,7 @@
       // struck: the old name typed over with X's, the new one after it
       inner += struck ? text(70, 246, 'aw', `font-size="14" fill="${TYPE}"`) + text(71, 249, 'XX', `font-size="14" fill="${GREY}"`) + text(104, 246, to, `font-size="14" fill="${TYPE}"`)   // (the X's a little lower and a shade lighter, a second pass of a tired ribbon: aw stays readable under them)
         : text(70, 246, to, `font-size="14" fill="${TYPE}"`);
+      if (scrawl) inner += `<text x="${w - 40}" y="258" font-family="'Indie Flower', cursive" font-size="34" fill="#5A5A6A" text-anchor="end" transform="rotate(-4 ${w - 40} 258)">${esc(scrawl)}</text>`;
     } else if (kind === 'award') {
       // 04:44's canister (night 1; nobody sent it): the company's commendation, your name and tomorrow's date (draft words
       // but its title, Arnold's: OPERATOR OF THE NIGHT)
