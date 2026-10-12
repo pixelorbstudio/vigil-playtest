@@ -928,11 +928,18 @@
   // DEFRAG and ROUTE, say) clicks its latch once you are logged in, where you can hear it.
   const strap = {}, strapMoving = {};     // strapMoving[slot]: { t, tug } while a strap is being drawn moving
   let strapsBusy = false, latchLater = [], latchAt = 0, queuedTake = null;
+  // a cartridge handed over and not yet taken out of the case: the strip says "new cart in the drawer: HEAP", dim, until it
+  // is (the playtest of 2026-10-12: the latch's click is silent until Arnold records it, and an unlock went unnoticed; the
+  // way "something in the tube." works). Kept with the straps, so a night replayed starts as its 23:00 was.
+  const newCarts = new Set();
   function loadStraps() {
     let kept = null; try { kept = JSON.parse(localStorage.getItem('vigil.straps') || 'null'); } catch (e) {}
     for (const l of Object.keys(CARTS)) strap[l] = kept?.[l] || (l === 'PONG' ? 'off' : 'on');
+    let fresh = []; try { fresh = JSON.parse(localStorage.getItem('vigil.newCarts') || '[]'); } catch (e) {}
+    newCarts.clear(); for (const l of fresh) if (CARTS[l]) newCarts.add(l);
   }
-  const keepStraps = () => { try { localStorage.setItem('vigil.straps', JSON.stringify(strap)); } catch (e) {} };
+  const keepStraps = () => { try { localStorage.setItem('vigil.straps', JSON.stringify(strap)); localStorage.setItem('vigil.newCarts', JSON.stringify([...newCarts])); } catch (e) {} };
+  const cartTaken = label => { if (newCarts.delete(label)) { playtest('strip: ' + label + ' taken out, "new cart" gone'); updateVitals(); } };
   loadStraps();
   // the latch lets go: heard, not seen
   function unlatch(label) {
@@ -1203,7 +1210,7 @@
     if (!c) { drawerBusy = false; return; }
     drawerBusy = true;
     await tween(DM.take.ms, u => { c.lift = DM.take.lift(u); });
-    tray.carts.splice(tray.carts.indexOf(c), 1); drawDrawer();
+    tray.carts.splice(tray.carts.indexOf(c), 1); drawDrawer(); cartTaken(c.label);
     lookTo(false);
     await carry(slot, c.label, true);
     insertCart(handoffK(), c.label);
@@ -2764,6 +2771,7 @@
     e.preventDefault(); e.stopImmediatePropagation();
     if (e.ctrlKey || e.altKey) return;
     if ((e.key === 'q' || e.key === 'Q' || e.key === 'Backspace') && !heldKeys.length) { if (!e.repeat) putBackHeld(); return; }
+    if (e.repeat) return;
     if (e.key.length !== 1 && e.key !== 'Enter' && e.key !== 'Backspace') return;
     if (heldKeys.push(e.key) === 1) typeAfterHeld();
   }, true);
@@ -2860,7 +2868,9 @@
       // the sip's first 20 ms; a dropped frame skipped it, so the coffee never went down.)
       if (!sipped && (f.event === 'sip' || f.seg >= 3)) {
         sipped = true;
-        if (room.coffee > 0) { playtest('sip'); sipSound(); steam.classList.add('puff'); setTimeout(() => steam.classList.remove('puff'), 900); setCoffee(Math.max(0, Math.round(room.coffee * 3 - 1)) / 3); shift.drink(); updateVitals(); glenn.complied('coffee'); }
+        // (the first sleep's drowse: the coffee has gone cold, and a sip does nothing; draft words, 2026-10-12)
+        if (room.drowsing) { playtest('sip: cold, nothing (the first sleep)'); sipSound(); term.say("it's gone cold."); }
+        else if (room.coffee > 0) { playtest('sip'); sipSound(); steam.classList.add('puff'); setTimeout(() => steam.classList.remove('puff'), 900); setCoffee(Math.max(0, Math.round(room.coffee * 3 - 1)) / 3); shift.drink(); updateVitals(); glenn.complied('coffee'); }
       }
       if (f.blend > 0) { poseDrawnMug(f.pose); mug.style.opacity = f.blend.toFixed(3); mug3dG.style.opacity = (1 - f.blend).toFixed(3); }
       else { mug.style.opacity = 0; mug3dG.style.opacity = 1; }
@@ -3116,6 +3126,9 @@
     const isEsc = e.key === 'Escape' || e.code === 'Escape';
     if (!tubeMenu.opened && !isEsc) return;
     e.preventDefault(); e.stopImmediatePropagation();
+    // (a key held down: Esc toggled the menu at the repeat rate, about 30 times a second, and Enter toggled a setting; only
+    // the arrows repeat here: the playtest, 2026-10-12)
+    if (e.repeat && !/^Arrow/.test(e.key)) return;
     if (!tubeMenu.opened) { const id = CODE_TO_ID[codeOf(e)]; if (id && !e.repeat) press(id); tubeMenu.open('esc'); return; }
     tubeMenu.key(isEsc ? 'Escape' : e.key);
   }, true);
@@ -3597,8 +3610,8 @@
     // technician ever comes. Drafts, all of them. A click on it is only that: it never reaches the prompt, the look-up edge
     // it sits in, Glenn's moments (acts) or anything under it.
     const CLICK = [
-      () => term.announce([{ text: 'Vigil Systems: Camera 1 is here for your safety. Thank you for smiling!' }]),
-      () => term.announce([{ text: 'Vigil Systems: Your interest in Camera 1 has been noted.' }]),
+      () => term.announce([{ text: 'Vigil Systems: Camera 1 is here for your safety. Thank you for smiling!', cls: 'vigil' }]),
+      () => term.announce([{ text: 'Vigil Systems: Your interest in Camera 1 has been noted.', cls: 'vigil' }]),
       () => glenn.say('Something wrong with the camera, chief?'),
     ];
     const OFFLINE = 'Vigil Systems: Camera 1 is offline. A technician has been notified.';
@@ -3612,7 +3625,7 @@
       if (blind) {
         if (room.camOffline || !canSay()) return;
         room.camOffline = true;
-        term.announce([{ text: OFFLINE }]);
+        term.announce([{ text: OFFLINE, cls: 'vigil' }]);
         logLine('vigild[412]: ' + OFFLINE.replace(/^Vigil Systems: /, ''));
         return;
       }
@@ -3748,7 +3761,7 @@
     const rows = board.rows(), me = rows.find(r => r.you), tomorrow = new Date(Date.now() + 864e5);
     room.tomorrowRow = { date: tomorrow.toDateString().slice(4, 10), op: me.op, merit: me.merit + 52 };   // (it stays on the board the rest of the night)
     // t 0: the board opens by itself, your row at the top, highlighted
-    term.announce([{ text: 'merit board: new leader.', cls: 'dim' }]);
+    term.announce([{ text: 'merit board: new leader.', cls: 'vigil' }]);
     const bv = term.board({ top: { ...me, merit: Math.max(me.merit, rows[0].merit + 3) } });
     const target = boardLines().findIndex(l => l.text === ' NIGHTS BEFORE');
     if (!short) {
@@ -3784,7 +3797,7 @@
     mark('climax, over a game: it freezes with the room');
     const me = board.rows().find(r => r.you), tomorrow = new Date(Date.now() + 864e5);
     room.tomorrowRow = { date: tomorrow.toDateString().slice(4, 10), op: me.op, merit: me.merit + 52 };
-    term.announce([{ text: 'merit board: new leader.', cls: 'dim' }]);     // (above the prompt, there when the game is done)
+    term.announce([{ text: 'merit board: new leader.', cls: 'vigil' }]);     // (above the prompt, there when the game is done)
     term.freeze(true);
     await window.__dlv.clear();
     roomStill(true);
@@ -3863,7 +3876,12 @@
     if (CLEAR_LINE(e)) { e.preventDefault(); typeKey('ClearLine'); hint.classList.add('gone'); return; }
     if (e.key.length === 1 || HANDLED.has(code) || code.startsWith('Arrow')) {
       e.preventDefault();
-      if (!e.repeat || e.key.length === 1 || code === 'Backspace' || code.startsWith('Arrow')) typeKey(e.key);
+      // (a key held down repeats only where repeating is typing: letters and Backspace at the prompt, the arrows anywhere,
+      // space while FIREWALL fires. Everywhere else a repeat toggled things: q asked to quit a game and its repeat quit it,
+      // space picked up and put down DEFRAG's block and tripped POWER's breaker, q closed a view and typed q's at the prompt:
+      // the playtest, 2026-10-12)
+      const repeats = code.startsWith('Arrow') || (term.inShell() && (e.key.length === 1 || code === 'Backspace')) || (e.key === ' ' && term.game() === 'firewall');
+      if (!e.repeat || repeats) typeKey(e.key);
     }
     hint.classList.add('gone');
   });
@@ -4254,7 +4272,7 @@
       afterLine = { at: performance.now() };
       if (keys) playtest(`  (typed over: ${keys} key${keys === 1 ? '' : 's'} while it typed)`);
     }
-    const mailNotice = () => { if (!account.mailRead && !inbox.items()[0]?.read) { term.announce([{ text: 'You have new mail.' }, { text: "Type 'mail' to see it.", cls: 'dim' }]); beep(740, .04, .02); } };
+    const mailNotice = () => { if (!account.mailRead && !inbox.items()[0]?.read) { term.announce([{ text: 'You have new mail.', cls: 'vigil' }, { text: "Type 'mail' to see it.", cls: 'vigil-dim' }]); beep(740, .04, .02); } };
     // (stand: the lesson in a few words, for his pane's top row and the folded row while it isn't his newest line)
     // (valid: the lesson's moment, as a line tied to one: a HOT cooled by itself before he could ask, and the lesson isn't
     // asked, nor spent. The night holds from his first key, not from when the lesson was queued: the cold playtest's dry
@@ -4408,14 +4426,16 @@
     // the copies stack on every repeat (design.md section 5, "Surface and focus, decided", 19): the mail server's records,
     // which may change while you're away. Shift 2's inbox holds every mail twice, same date and time; night 2's three
     // times; night 3's four. The night's own mail; a mail that is new tonight (a cartridge unlocked) comes once.
-    const copies = () => shift?.no || 1;
+    // (Cut, Arnold, 2026-10-12: the copies read as a bug, to the testers and to him. Each mail arrives once, whatever the
+    // shift; the loop's other clues stay: Glenn's log, "Back already", "0 minutes later", the board.)
+    const copies = () => 1;
     // a new night: the welcome (read if you read it before), and the night's mail still to come
     function reset() { box = Array.from({ length: copies() }, () => ({ ...welcome, read: !!account.mailRead })); sent = new Set(); }
     function add(m, quiet = false, n = 1) {
       const at = shift.clock().slice(0, 5);
       for (let i = 0; i < n; i++) box.push({ at, ...m, read: false });
       logLine(`mail: new message from ${m.from}`);
-      if (!quiet) { term.announce([{ text: 'You have new mail.', cls: 'dim' }]); mailChime(); }
+      if (!quiet) { term.announce([{ text: 'You have new mail.', cls: 'vigil' }]); mailChime(); }
       updateVitals();
     }
     // the night's mail, by the shift clock
@@ -4505,7 +4525,7 @@
   const strip = { ok: new Map(), nominalUntil: 0, note: null, noteUntil: 0, peak: 0, timer: 0 };
   const stripOks = () => { const now = performance.now(); return [...strip.ok].filter(([, until]) => until > now).map(([unit]) => ({ unit, ok: true })); };
   // (tube: a canister in the receiver not yet collected, a dim "something in the tube." after the rest; the dry run, 2026-10-11)
-  const stripNow = () => { const now = performance.now(); return { lit: now < strip.nominalUntil, note: now < strip.noteUntil ? strip.note : null, tube: !!dlv.can && !dlv.can.spent && dlv.stage === 'idle' }; };
+  const stripNow = () => { const now = performance.now(); return { lit: now < strip.nominalUntil, note: now < strip.noteUntil ? strip.note : null, tube: !!dlv.can && !dlv.can.spent && dlv.stage === 'idle', carts: [...newCarts] }; };
   // the strip redrawn once its moment has passed
   function stripLater(ms) { clearTimeout(strip.timer); strip.timer = setTimeout(() => { updateVitals(); const now = performance.now(), next = Math.min(...[...strip.ok.values(), strip.nominalUntil, strip.noteUntil].filter(t => t > now)); if (Number.isFinite(next)) stripLater(next - now + 20); }, ms); }
   function stripSay(note, ms = 6000) { strip.note = note; strip.noteUntil = performance.now() + ms; updateVitals(); stripLater(ms + 20); }
@@ -4602,7 +4622,7 @@
         const r = board.rank();
         if (r <= 3 && !room.turned) return;
         boardSeen.rank = r; boardSeen.at = performance.now();
-        term.announce([{ text: `merit board: ${ORD(r)} of 6.`, cls: 'dim' }]);
+        term.announce([{ text: `merit board: ${ORD(r)} of 6.`, cls: 'vigil' }]);
       }, 6500);
     },
   };
@@ -4769,25 +4789,36 @@
   // art, listed placeholders). A fly crossing the room in the drawing's parallax, silent (Arnold, 2026-10-11: its buzz,
   // made in code, is gone, as the camera's whir went; if a fly is heard again, it is a recording); a unit's LED blinking out of its pattern for a few seconds; a shape passing behind rack-right's glass. Each happens
   // in front of you (looking ahead at the room, nothing held, someone in the chair, the page in view, no beat playing and
-  // nobody typing upstairs) and leaves nothing changed. Rare enough to stay strange: at most ODD.most a shift, 4 real minutes
-  // apart at least, more likely in the quiet (nothing open, nothing new on the tube for 20 s); night 1's long stretch
-  // (03:00 to 04:44) puts one in two of its three quiet minutes' places, Glenn's line keeping the third.
-  const ODD = { from: 40, most: 4, gap: 240000, longGap: 120000, every: 5000, p: .012, pQuiet: .045 };
-  const odd = { n: 0, at: -1e9, busy: false, last: null };
+  // nobody typing upstairs) and leaves nothing changed. Rare enough to stay strange.
+  // (2026-10-12, the playtest of shifts 1 and 2: they came twice on shift 1 and once on shift 2, by chance. Now ODD.most a
+  // shift, spread out: the shift from 00:40 to its end (night 1: to 04:44, the climax's) is cut in four, and each quarter has
+  // one: more likely in the quiet (nothing open, nothing new on the tube for 20 s), and past ODD.late of its quarter at the
+  // first moment it can be seen; 90 real seconds apart at least. The lull below, night 1's long stretches, can take a
+  // quarter's moment early.)
+  const ODD = { from: 40, to: { 1: 344 }, end: 385, most: 4, minGap: 90000, every: 5000, p: .02, pQuiet: .06, late: .6 };
+  const odd = { n: 0, at: -1e9, busy: false, last: null, slots: new Set() };
+  // which quarter of the shift this is (i), and how far into it (k, 0 to 1); null outside them
+  function oddSlot() {
+    if (!shift) return null;
+    const to = ODD.to[shift.level] || ODD.end, len = (to - ODD.from) / ODD.most, i = Math.floor((shift.t - ODD.from) / len);
+    return i >= 0 && i < ODD.most ? { i, k: (shift.t - ODD.from - i * len) / len } : null;
+  }
   const oddReady = () => shift && !shift.over && !account.loggingIn && !asleep && room.power && !room.beat && !room.talking && !room.melting && !room.still
     && look.rest === 0 && !holding() && (!document.hidden || NOPAUSE) && present() && !tubeMenu?.opened;
   async function oddMoment(kind, why = 'the quiet') {
     if (odd.busy) return false;
     if (!kind) { const kinds = ['fly', 'led', 'shape'].filter(k => k !== odd.last); kind = kinds[rnd(kinds.length)]; }
     odd.busy = true; odd.n++; odd.at = performance.now(); odd.last = kind;
+    { const sl = oddSlot(); if (sl) odd.slots.add(sl.i); }
     playtest(`ominous moment: ${kind} (${why})`);
     try { await ({ fly: oddFly, led: oddLed, shape: oddShape })[kind](); } finally { odd.busy = false; }
     return true;
   }
   setInterval(() => {
-    if (!shift || odd.n >= ODD.most || shift.t < ODD.from || performance.now() - odd.at < ODD.gap || !oddReady()) return;
-    const quiet = !shift.open().length && term.quietFor() > 20000;
-    if (Math.random() < (quiet ? ODD.pQuiet : ODD.p)) oddMoment(null, quiet ? 'the quiet' : 'a while');
+    const sl = oddSlot();
+    if (!sl || odd.busy || odd.slots.has(sl.i) || performance.now() - odd.at < ODD.minGap || !oddReady()) return;
+    const quiet = !shift.open().length && term.quietFor() > 20000, due = sl.k >= ODD.late;
+    if (due || Math.random() < (quiet ? ODD.pQuiet : ODD.p)) oddMoment(null, due ? 'its quarter of the shift' : quiet ? 'the quiet' : 'a while');
   }, ODD.every);
   // the fly: a dot and its wings in the room's greys (rough), darting across between waypoints with a hover or two, its depth
   // drifting between the racks and the mug (the parallax and its size follow it). Silent.
@@ -4877,7 +4908,7 @@
     cheer.said = true;
     const text = c[1](account.name || account.user);
     playtest('vigil: ' + text); logLine('vigild[412]: ' + text.replace(/^Vigil Systems: /, ''));
-    term.announce([{ text }]);
+    term.announce([{ text, cls: 'vigil' }]);
   }, 1000);
   let fixesTonight = 0;
   function fixPraise(batch) {
@@ -5050,12 +5081,39 @@
     const c = CLIENT_FIX[u];
     return c ? `${u} ${reboot ? 'back online' : 'rerouted'}. ${c}` : reboot ? `${u} back online.` : `${u} rerouted, cooling.`;
   };
-  let clientLineAt = 0, longN = 0;
+  let clientLineAt = 0;
   // Night 1's long stretch, 03:00 to 04:44 (Arnold, 2026-10-06: the 3-minute limit was a guide; no dead air right before
   // 04:44): after about a minute with nothing new on the tube and nothing open, every third time a short line from Glenn
   // (approved by Arnold, 2026-10-06). (2026-10-11: the client's line the other two times is gone with the ambient lines.)
+  // (2026-10-12, the playtest of shifts 1 and 2: the other two times were dead air. The lull: in night 1's long stretches,
+  // 03:00 to 04:44 on both of its shifts and 01:20 to 02:50 on shift 2, never a real minute with nothing: after LULL.after
+  // with nothing new (on the tube, in Glenn's pane, an odd moment, a canister landing) and nothing open, at the shell, the
+  // next of an odd moment (the shift's quarter's, if it hasn't had one), a small trouble (shift.lull: HOT once you've met it,
+  // till 04:38) and one of Glenn's lines (each once a shift); what can't come now gives way to the next. It doesn't wait
+  // for someone in the chair (an odd moment does). sim.js and shift-audit.js measure it.)
   const LONG_GLENN = ['Quiet one, chief.', 'Still with me, chief?', "Merit board's holding. Keep it that way, chief.", 'Hang in there, chief. Not long now.'];
-  const LONG = { from: 240, to: 344, after: 60000 };
+  const LULL = { after: 40000, retry: 5000, windows: { 1: [[240, 344]], 2: [[140, 230], [240, 344]] }, troubleTo: 338, order: ['odd', 'trouble', 'glenn'] };
+  const lull = { n: 0, said: new Set(), at: 0 };
+  // (a canister kept in the receiver from the last shift carries its landing time from that page's clock: only one that
+  // landed in this page counts)
+  const sinceNew = now => now - Math.max(now - term.quietFor(), odd.at, lull.at, ...[dlv.can?.landedAt].filter(t => t > 0 && t <= now));
+  function lullTry(what, now) {
+    if (what === 'odd') {
+      const sl = oddSlot();
+      if (!sl || odd.busy || odd.slots.has(sl.i) || now - odd.at < ODD.minGap || !oddReady()) return false;
+      oddMoment(null, 'the lull'); return true;
+    }
+    if (what === 'trouble') {
+      if (shift.t >= LULL.troubleTo) return false;
+      const free = Object.keys(UNITS).filter(u => !shift.state(u));
+      const e = free.length && shift.lull(free[rnd(free.length)]);
+      if (!e) return false;
+      playtest(`lull: a small trouble (${e.kind} ${e.unit})`); showEvent(e); return true;
+    }
+    const line = LONG_GLENN.find(l => !lull.said.has(l));
+    if (!line || room.talking || !term.talkable()) return false;
+    lull.said.add(line); glenn.say(line); playtest('lull: a line from Glenn'); return true;
+  }
   // ---- the room's new moves (the proposal, section 1: the room carries every climax; sound off, it still shows)
   // the bright tone (.led.ping) rippling up both racks from the bottom, unit after unit, over about 0.6 s; units in
   // trouble keep their own state (the game lies about the story, never about the rules)
@@ -5122,7 +5180,7 @@
     playtest(short ? 'the turn (seen: short)' : `the turn: ${ORD(board.rank())} of 6, aw`);
     boardSeen.rank = board.rank(); boardSeen.at = performance.now();
     rackRipple(); relayCascade();
-    term.announce([{ text: `merit board: ${ORD(boardSeen.rank)} of 6.`, cls: 'dim' }]);
+    term.announce([{ text: `merit board: ${ORD(boardSeen.rank)} of 6.`, cls: 'vigil' }]);
     await wait(short ? 500 : 1500);
     await glenn.voice('aw', 'nice work, site 4', { fast: short });
     if (!short) { await wait(900); const third = board.rank(); glenn.sayIf(() => board.rank() === third, cold() ? "Third. Site 2's noticing, chief." : "Ha! Third! Even site 2's noticing, chief."); }
@@ -5134,14 +5192,14 @@
     const dt = shift.t - boardT; boardT = shift.t;
     if (dt > 0 && !shift.over) board.tick(dt, room.power && !asleep && !account.loggingIn);
     if (account.loggingIn || shift.over || room.beat || asleep) return;
-    // night 1's long stretch: nothing new for a minute, something comes
-    const longStretch = shift.level === 1 && shift.t >= LONG.from && shift.t < LONG.to && !room.climaxed;
-    if (longStretch && !shift.open().length && term.quietFor() > LONG.after && now - clientLineAt > LONG.after && term.inShell() && !room.talking && room.power && term.talkable()) {
+    // night 1's long stretches: nothing new for LULL.after, something comes (the lull, above)
+    const inLull = shift.level === 1 && !room.climaxed && (LULL.windows[shift.no] || []).some(([a, b]) => shift.t >= a && shift.t < b);
+    if (inLull && !shift.open().length && sinceNew(now) > LULL.after && now - clientLineAt > LULL.retry && term.inShell() && room.power && !room.melting) {
       clientLineAt = now;
-      const k = longN++ % 3;
-      if (k === 2) { glenn.say(LONG_GLENN[Math.floor(longN / 3 - 1) % LONG_GLENN.length]); playtest('long stretch: a line after a quiet minute'); }
-      // (one of the other two: the quiet's ominous moment, if the night has one left and the last was two minutes ago)
-      else if (k === 0 && odd.n < ODD.most && now - odd.at > ODD.longGap && oddReady()) oddMoment(null, 'the long stretch');
+      for (let i = 0; i < LULL.order.length; i++) {
+        const what = LULL.order[(lull.n + i) % LULL.order.length];
+        if (lullTry(what, now)) { lull.n += i + 1; lull.at = now; break; }
+      }
       return;
     }
     if (shift.level !== 1) return;
@@ -5150,7 +5208,7 @@
     if (r <= 3 && !room.turned) { room.turned = true; turnBeat(); return; }   // the first pass into 3rd: the turn
     if (now - boardSeen.at < 30000 || room.talking || !term.talkable()) return;
     boardSeen.rank = r; boardSeen.at = now;
-    term.announce([{ text: `merit board: ${ORD(r)} of 6.`, cls: 'dim' }]);
+    term.announce([{ text: `merit board: ${ORD(r)} of 6.`, cls: 'vigil' }]);
     playtest(`board: ${ORD(r)} of 6 (merit ${board.merit.total})`);
     // (each only while the board still says so: the dry run heard "Second." with the board at 3rd)
     const still = () => board.rank() === r;
@@ -5212,7 +5270,7 @@
     eyeStrain();
     if (room.coffee < 1) setCoffee(1);                 // a new night starts with a full mug
     room.defragTaught = false;                         // and the night's first DEFRAG teaches
-    fixesTonight = 0; strip.peak = 0; strip.ok.clear(); clash.reset(); odd.n = 0; odd.at = -1e9; cheer.said = false;   // (the fix feel's count, the strip, the clash orders: the night's own)
+    fixesTonight = 0; strip.peak = 0; strip.ok.clear(); clash.reset(); odd.n = 0; odd.at = -1e9; odd.slots.clear(); lull.n = 0; lull.said.clear(); lull.at = 0; cheer.said = false;   // (the fix feel's count, the strip, the clash orders: the night's own)
     room.pongHaunted = false;                          // and the night's first Pong isn't only yours
     inbox.reset();                                     // the welcome, and the night's mail to come
     room.tty2Done = false; woke = false;               // tty2, and 04:44
@@ -5238,6 +5296,7 @@
   function handOver(cart) {
     unlatch(cart);
     shift.handOver(cart);
+    if (room.cart !== cart && tray.carts.some(c => c.label === cart)) { newCarts.add(cart); playtest('strip: new cart in the drawer: ' + cart); updateVitals(); }
   }
   // what the racks do, shown in the room: the LED, the log, and an alert above whatever is being typed
   function showEvent(e, quiet = false) {
@@ -5296,7 +5355,7 @@
     const now = performance.now(), dt = now - shiftT; shiftT = now;
     if (room.melting || asleep || account.loggingIn) return;   // the room is busy dying, you are out, or not in yet
     // a cartridge the night hands over at its start: its latch clicks a moment after you are in
-    if (latchLater.length) { if (!latchAt) latchAt = now + 2500; else if (now >= latchAt) { for (const l of latchLater.splice(0)) unlatch(l); latchAt = 0; } }
+    if (latchLater.length) { if (!latchAt) latchAt = now + 2500; else if (now >= latchAt) { for (const l of latchLater.splice(0)) { unlatch(l); if (room.cart !== l) newCarts.add(l); } latchAt = 0; updateVitals(); } }
     for (const e of shift.tick(dt)) showEvent(e);
     inbox.tick(shift.t);
     glenn.lessonTick();
@@ -5318,7 +5377,7 @@
     if (!woke && shift.t >= 344 && shift.t < 380 && shift.level === 1) { if (!room.beat) { woke = true; climax0444(); } }
     else if (!woke && shift.t >= 344 && shift.t < 380 && term.inShell() && look.rest === 0 && !holding() && (!document.hidden || NOPAUSE) && present()) { woke = true; wakeUp(); }   // (not over a held paper: the story audit, 2026-10-06)
     // the first dip in energy: the company line, then coffee (one moment, not two: the coffee line used to come at 45%)
-    if (shift.energy < .5 && glenn.once('coffee', 'Stay sharp, chief. Operators found asleep get reassigned. Company policy!', "You're fading on me. Be a pal and have some coffee. Give the mug a click.")) glenn.order('coffee', 'be a pal and have some coffee');
+    if (shift.energy < .5 && !shift.over && glenn.once('coffee', 'Stay sharp, chief. Operators found asleep get reassigned. Company policy!', "You're fading on me. Be a pal and have some coffee. Give the mug a click.")) glenn.order('coffee', 'be a pal and have some coffee');
     // once on night 1 (and its replays), while you sit looking at an empty prompt, the M key goes down by itself (the story
     // audit, 2026-10-06: it pressed itself every night)
     // (its window, 00:15 to 01:00, kept: missed, it doesn't come that night; never over a lesson or an order standing on his
@@ -5439,7 +5498,7 @@
   if (new URLSearchParams(location.search).has('dev')) window.dev = {
     stuck: u => { const e = shift.inject(u, 'STUCK'); if (e) showEvent(e); }, hot: u => { const e = shift.inject(u, 'HOT'); if (e) showEvent(e); },
     down: u => { const e = shift.inject(u, 'DOWN'); if (e) showEvent(e); }, found: (c = 'DEFRAG') => { const e = shift.find(c); if (e) showEvent(e); },
-    insert: (label = 'DEFRAG') => { const had = room.cart; if (had) ejectCart(); setTimeout(() => { const i = tray.carts.findIndex(c => c.label === label); if (i >= 0) tray.carts.splice(i, 1); strap[label] = 'off'; drawDrawer(); insertCart(.0667, label); }, had ? 1400 : 0); },
+    insert: (label = 'DEFRAG') => { cartTaken(label); const had = room.cart; if (had) ejectCart(); setTimeout(() => { const i = tray.carts.findIndex(c => c.label === label); if (i >= 0) tray.carts.splice(i, 1); strap[label] = 'off'; drawDrawer(); insertCart(.0667, label); }, had ? 1400 : 0); },
     strap: label => label ? strap[label] : { ...strap }, unlatch: label => unlatch(label), strapSound: (slot = 1) => strapSound(slot), lockedSound: (slot = 1) => strapLockedSound(slot), cant: (kind = 'drawer', pan = 0) => cantSound(kind, pan),
     loss: (r = 'rack-left') => { const e = shift.inject(r, 'LOSS'); if (e) showEvent(e); },
     oom: (u = 'L33') => { const e = shift.inject(u, 'OOM'); if (e) showEvent(e); },
@@ -5482,7 +5541,8 @@
     // the fix feel: the strip's state now; "all units nominal" lit for ms; the cascade; the clash order now (shift 1 or 2)
     strip: () => ({ ...stripNow(), ok: stripOks(), peak: strip.peak }), nominal: (ms = 5000) => { strip.nominalUntil = performance.now() + ms; updateVitals(); stripLater(ms + 20); },
     // the quiet's ominous moments now (fly | led | shape, or one at random), and how many tonight; the hum's hour and hunt
-    odd: kind => oddMoment(kind, 'dev'), humForce: (hunt, hourDb) => hum.force(hunt == null ? null : { hunt, hourDb: hourDb ?? 0 }), get odds() { return { ...odd }; }, hum: () => hum.state(),
+    odd: kind => oddMoment(kind, 'dev'),
+    lull: () => ({ n: lull.n, said: [...lull.said], since: Math.round(sinceNew(performance.now())), quiet: Math.round(term.quietFor()), inShell: term.inShell(), beat: room.beat, climaxed: room.climaxed, power: room.power, open: shift.open().length, slots: [...odd.slots], t: shift.t, sinceTry: Math.round(performance.now() - clientLineAt), win: (LULL.windows[shift.no] || []).some(([a, b]) => shift.t >= a && shift.t < b), level: shift.level, no: shift.no, loggingIn: account.loggingIn, over: shift.over, asleep }), humForce: (hunt, hourDb) => hum.force(hunt == null ? null : { hunt, hourDb: hourDb ?? 0 }), get odds() { return { ...odd }; }, hum: () => hum.state(),
     cascade: () => relayCascade(420, 4, true), spinUp: (side = 'left') => rackFans.spinUp(side), tick: (i = 0) => beep(300 + i * 30, .03, FEEL.tick), clash: () => ({ unit: clash.unit, n: clash.n, lastFixed: clash.lastFixed }),
     get board() { return board; },                    // the night's board: dev.board.rows(), .rank(), .merit
     turn: () => turnBeat(), ripple: () => { rackRipple(); relayCascade(); },   // night 1's turn, again; the ripple alone
@@ -5570,7 +5630,7 @@
       if (gone()) return;
       playtest(`board: first at 05:30 (merit ${board.merit.total})`);
       rackRipple(); relayCascade();
-      term.announce([{ text: 'merit board: 1st of 6.', cls: 'dim' }]);
+      term.announce([{ text: 'merit board: 1st of 6.', cls: 'vigil' }]);
       await wait(900);
     }
     term.announce([...lines, ...(top ? boardReport(shift.report(), counted) : [])].map(t => ({ text: t, cls: 'dim' })));
@@ -5588,7 +5648,7 @@
       while (!gone() && (shift.t < t || performance.now() - shown < after)) await wait(250);
       if (gone()) return;
       logLine('vigild[412]: ' + text);
-      term.announce([{ text: `${shift.clock().slice(0, 5)}  ${text}`, cls: 'dim' }]);
+      term.announce([{ text: `${shift.clock().slice(0, 5)}  ${text}`, cls: 'vigil' }]);   // (Vigil's, as its other notices: 2026-10-12)
     }
     while (!gone() && (shift.t < 403 || performance.now() - shown < 50000)) await wait(250);
     // what you hold you put down first: it is still where you put it at 23:00 (every night: a held slip used to vanish)
@@ -5688,15 +5748,30 @@
     playtest('the first sleep: the eyes go');
     cam?.turn('you'); cam?.lamp('asleep', true);
     const t0 = performance.now(), MS = 20000;
-    // the lids: [seconds in, upper to, lower to, closing, held, opening]: each droop deeper and slower than the last
-    const DROOPS = [[3.5, .62, .93, .9, .3, 1], [8, .46, .88, 1.1, .45, 1.2], [12, .32, .84, 1.3, .6, 1.3], [15.5, .2, .8, 1.5, .8, 1.5]];
-    for (const [at, u, d, c, h, o] of DROOPS) setTimeout(() => { if (!gone() && asleepOK()) eyes.droop(u, d, c, h, o); }, at * 1000);
-    let asleepOK = () => true;
-    while (performance.now() - t0 < MS) { if (gone()) { drowse(0); asleepOK = () => false; eyes.wake(); return; } drowse(Math.min(1, (performance.now() - t0) / MS) ** 1.4); await wait(200); }
+    // (Arnold, 2026-10-12: the first sleep with plenty of energy read as the game forcing it. The cause is shown: over the
+    // drowse the energy bar drains to zero from wherever it is, steadily, faster than anything in the night, and you watch it
+    // go; a sip does nothing, the coffee is cold (the mug, below); the droops come as the bar passes their marks. A night lost
+    // asleep the ordinary way is as it was. The carry to shift 2 was saved at 05:30, before this.)
+    const e0 = Math.max(shift.energy, .02);
+    room.drowsing = true;
+    playtest(`the first sleep: the bar drains from ${Math.round(e0 * 100)}%`);
+    // the lids: [the bar's share of where it started, upper to, lower to, closing, held, opening]: each droop deeper and
+    // slower than the last (at 3.5, 8, 12 and 15.5 s of the 20, as they were by the clock)
+    const DROOPS = [[.825, .62, .93, .9, .3, 1], [.6, .46, .88, 1.1, .45, 1.2], [.4, .32, .84, 1.3, .6, 1.3], [.225, .2, .8, 1.5, .8, 1.5]];
+    let droops = 0;
+    const done = () => { room.drowsing = false; };
+    while (performance.now() - t0 < MS) {
+      if (gone()) { done(); drowse(0); eyes.wake(); return; }
+      const u = Math.min(1, (performance.now() - t0) / MS), target = e0 * (1 - u);
+      if (shift.energy > target) shift.spend(shift.energy - target);
+      while (droops < DROOPS.length && shift.energy <= e0 * DROOPS[droops][0]) { const [, up, d, c, h, o] = DROOPS[droops++]; eyes.droop(up, d, c, h, o); }
+      drowse(u ** 1.4); await wait(100);
+    }
+    shift.spend(shift.energy);
     drowse(1);
     await wait(1200);
     while (!gone() && (holding() || dlv.busy || !term.inShell())) await wait(250);   // (whatever was picked up meanwhile is put down first)
-    if (gone()) { drowse(0); eyes.wake(); return; }
+    if (gone()) { done(); drowse(0); eyes.wake(); return; }
     await eyes.sleep();   // (the eyes close, slowly, fighting it: the dark it falls into)
     eyes.cover(true);                                // (the fall-asleep screen holds the dark over them)
     playtest('the first sleep: black, "not yet."');
@@ -5712,6 +5787,7 @@
     yet.hidden = true; yet.classList.remove('gone');
     await wait(700);
     cam?.lamp('asleep', false);
+    done();                                           // (the coffee is cold until the boot: a sip on the dark does nothing either)
   }
   // (the reboot is the blink too, on every shift, as a clocked-out night is, so every loop looks the same: Arnold, 2026-10-10.
   // The page comes back black from its first paint, index.html; the blink ends once the room is up, at the boot below)
@@ -5723,7 +5799,7 @@
   window.addEventListener('keydown', e => {
     if (nightOver.hidden) return;
     e.stopImmediatePropagation(); e.preventDefault();
-    if ($('no-choices').hidden) return;               // not yet
+    if ($('no-choices').hidden || e.repeat) return;   // not yet (and a key held down chooses once)
     if (e.key === 'r' || e.key === 'R') reboot();
     else if (e.key === 'p' || e.key === 'P') showReport();
     else if (e.key === 'Enter' && document.activeElement?.closest('#night-over')) document.activeElement.click();
@@ -5928,7 +6004,8 @@
       else {
         const all = [];
         let cmdRow = -1;
-        for (const l of lines.slice(-MAX)) { if (l === pane.cmd) cmdRow = all.length; all.push(...wrap(runsOf(l))); }
+        // (a line's rows after its first are marked: a Vigil message on several rows is one band, two messages two bands)
+        for (const l of lines.slice(-MAX)) { if (l === pane.cmd) cmdRow = all.length; const w = wrap(runsOf(l)); w.forEach((r, i) => { if (i) r.cont = true; }); all.push(...w); }
         if (mode === 'shell') all.push(...wrap([{ text: prompt() + line }]));
         else if (mode === 'login') all.push(...wrap([{ text: LOGIN + line }]));
         // (the picker says how it works, in one dim line above it: the dry run's stranger typed a name and nothing happened)
@@ -6515,7 +6592,9 @@
       },
       route: (args) => {
         if (room.cart !== 'ROUTE') return cartHint('route', 'ROUTE');
-        const r = (args[0] || '').toLowerCase().replace(/^(left|right)$/, 'rack-$1');
+        // (rack-left, left, left-rack, "rack left", "left rack": the same rack; the playtest of 2026-10-12 typed left-rack)
+        const a = args.join('-').toLowerCase().replace(/[_]+/g, '-'), side = (a.match(/^(?:rack-?)?(left|right)(?:-?rack)?$/) || [])[1];
+        const r = side ? 'rack-' + side : a;
         if (!['rack-left', 'rack-right'].includes(r)) return ['usage: route <rack-left|rack-right>'];
         return runRoute(r);
       },
@@ -6566,6 +6645,7 @@
     };
 
     let handbookHold = 0;
+    const AFTER_HOURS = new Set(['reboot', 'reroute', 'defrag', 'route', 'heap', 'firewall', 'power', 'pong', 'fix']);
     function runCommand(raw) {
       let [cmd, ...args] = raw.trim().split(/\s+/);
       if (!cmd) return;
@@ -6575,7 +6655,12 @@
       args = args.filter(a => !/^(please|pls|plz|thanks|thx)[.!]?$/i.test(a));   // (reboot L14 please)
       const name = cmd.toLowerCase().replace(/(.)[?!.,]+$/, '$1');   // (status? is status)
       const fn = COMMANDS[name] && !talkedTo(raw, name, args) ? COMMANDS[name] : null;
-      { const al = ALIASES[name], to = fn ? name : al ? (typeof al === 'function' ? al(args)[0] : typeof al === 'string' ? al : al[0]) : FIX_WORDS.has(name) ? 'fix' : null; if (to) onCommand?.(to, args); }
+      const al = ALIASES[name], to = fn ? name : al ? (typeof al === 'function' ? al(args)[0] : typeof al === 'string' ? al : al[0]) : FIX_WORDS.has(name) ? 'fix' : null;
+      // (Arnold, 2026-10-12: from the clock-out at 05:30 there is no work. The fixes and every cartridge game answer one dim
+      // line; looking around, the drawers, the mail, the board, status and top still work; a game running at 05:30 finishes
+      // but can't be started again; what is still broken is the day shift's, as the report says. Draft words.)
+      if (AFTER_HOURS.has(to) && shift?.over && shift.ending === 'dawn') { playtest(`after the clock-out: ${raw.trim()} (no work)`); print('shift over. the day shift has it.', 'dim'); return; }
+      if (to) onCommand?.(to, args);
       const out = fn ? fn(args) : notFound(raw, cmd, name, args);
       out.forEach(l => typeof l === 'string' ? print(l) : l.html !== undefined ? (lines.push(l), render()) : print(l.text, l.cls));
     }
@@ -7082,7 +7167,8 @@
       updateVitals();
       mode = 'game'; gameName = 'route';
       // the night's first game teaches: five hops, no dead links, a slow train
-      const dial = room.routeTaught ? shift.routeDial() : { hops: 5, dead: 0, tick: 170 };
+      const dial = room.routeTaught ? shift.routeDial(rack) : { hops: 5, dead: 0, tick: 170 };
+      if (dial.eased) playtest(`route: ${rack}'s game eased ${dial.eased} (${dial.hops} hops, ${dial.dead} dead, ${dial.tick} ms)`);
       room.routeTaught = true;
       const g = createRoute({ hops: dial.hops, dead: dial.dead });
       if (window.dev) window.dev.game = g;
@@ -7771,7 +7857,9 @@
       let prev = { bx: g.bx, by: g.by, vx: g.vx, vy: g.vy, cy: g.cy }, pyShown = g.py, lastFrame = performance.now();
       const header = () => {
         const passed = g.returns > best;
-        return { html: `<span class="dim"> pong   you ${g.you} · cpu ${g.cpu}   returns </span><span class="${passed ? 'ok' : ''}">${g.returns}</span><span class="dim">   ${hiText(best, bestBy)}</span>` };
+        // (the strange match, while M.'s key is still under the cart: the scoreboard's cpu reads m; the playtest of 2026-10-12 read
+        // the match as a bug, impossible to lose, not as someone playing for you. Nothing else changes)
+        return { html: `<span class="dim"> pong   you ${g.you} · ${set.cpu.strange ? 'm' : 'cpu'} ${g.cpu}   returns </span><span class="${passed ? 'ok' : ''}">${g.returns}</span><span class="dim">   ${hiText(best, bestBy)}</span>` };
       };
       // (13 rows in all under Glenn's folded row: the court's 11 rows drawn in 10 text rows, the ball and paddles at that
       // step: field.rowStep)
@@ -8228,14 +8316,14 @@
     }
     async function welcome() {
       await wait(250); print('');
-      print('Welcome to the Vigil terminal.');
+      print('Welcome to the Vigil terminal.', 'vigil');   // (Vigil's lines are its broadcasts' bars: 2026-10-12)
       await wait(200);
       // (the welcome mail's notice waits for Glenn's introduction, the first time: the simulation report, 2026-10-06, item
       // 3: he typed it while the player read the mail the screen had just sent them to)
-      if (!account.mailRead) { if (glenn.taught('intro')) { print('You have new mail.'); print("Type 'mail' to see it.", 'dim'); } }
+      if (!account.mailRead) { if (glenn.taught('intro')) { print('You have new mail.', 'vigil'); print("Type 'mail' to see it.", 'vigil-dim'); } }
       else print("Type 'help' to see what it can do.", 'dim');
       // the board's pointer, under the mail (design.md section 5: "board: 6th of 6. type board.")
-      if (shift.level === 1 && board) print(`merit board: ${ORD(board.rank())} of 6. type board.`, 'dim');
+      if (shift.level === 1 && board) print(`merit board: ${ORD(board.rank())} of 6. type board.`, 'vigil');
     }
 
     // A BIOS line waiting on what is really loading (design.md section 5, "Surface and focus, decided", 12; build step 5,
@@ -8390,6 +8478,7 @@
       takeLine() { const l = line; line = ''; render(); return l; },
       giveLine(l) { line = l; render(); drain(); },
       inShell: () => mode === 'shell',
+      game: () => mode === 'game' ? gameName : null,
       // what the tube is showing, for a beat that won't wait: a view (top, the board, tail -f, the matrix, the mail, the
       // switches) gives way to it; a cartridge game freezes with the room
       view: () => mode === 'proc' && stopProc && !frozen ? 'view' : mode === 'game' && ['mail', 'switch', 'glenn'].includes(gameName) ? 'view' : mode === 'game' && gameName && !frozen ? 'game' : null,
@@ -8911,6 +9000,7 @@
       e.preventDefault(); e.stopImmediatePropagation();
       if (!gestured) { gestured = true; playtest('start: the first key (the hum starts)'); }
       const id = CODE_TO_ID[codeOf(e)]; if (id && !e.repeat) press(id);   // (the drawn key goes down, silent)
+      if (e.repeat && !/^Arrow/.test(e.key)) return;
       key(e.key);
     }, true);
     addEventListener('resize', () => { if (!posed && !titleUp) return; frame(); pose(titleUp ? -1 : (performance.now() - pullAt) / 1000); if (titleUp) draw(); });
@@ -8924,7 +9014,7 @@
       const mc = flight?.layers.find(f => f.z === 'monitor')?.svg, ms = mc?.querySelector('#' + screenG.id), mf = ms?.querySelector('svg path:nth-of-type(2)');
       if (mf) { mf.style.transition = face.style.transition; ms.classList.remove('off'); }
       terminal.classList.add('warm-brief'); setTimeout(() => terminal.classList.remove('warm-brief'), 500);
-      playFx('crt-on', .6, 0);                       // (the tube coming on: the recording when there is one, silent till then)
+      playFx('power-on', .6, 0);                     // (the room powering up as the shift starts: the switch, the racks' fans spinning up; assets/sounds/fx/SOURCES.md)
       terminal.style.willChange = 'auto';             // (scaled, the tube's layer is drawn again at each size, not a texture stretched)
       fly(); unpark();
       let rested = false;

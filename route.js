@@ -18,9 +18,9 @@
   window.createRoute = function ({ hops = 4, dead = 0, rand = Math.random } = {}) {
     const key = (x, y) => x + ',' + y;
     const midY = Math.floor(ROWS / 2);
-    let train = [], dir, next, state = 'running', reached = 0, drops = 0;
+    let train = [], dir, turns = [], state = 'running', reached = 0, drops = 0;
     // the train enters from the uplink heading right, its cars trailing back off the board
-    function enter(len) { train = Array.from({ length: len }, (_, i) => [2 - i, midY]); dir = next = DIRS.right; }
+    function enter(len) { train = Array.from({ length: len }, (_, i) => [2 - i, midY]); dir = DIRS.right; turns = []; }
     enter(3);
     const port = [COLS - 1, 1 + Math.floor(rand() * (ROWS - 2))];
     // the lane in front of the uplink and the cells around the port stay clear
@@ -66,16 +66,20 @@
     }
     nextHop();
 
-    // steer: never straight back into yourself
+    // steer: never straight back into yourself. The next two turns are kept, one a step (2026-10-12, the playtest: a quick
+    // double tap, up then left inside one step, lost the left, which was checked against the way the train still went):
+    // each turn is checked against the one before it, so up-then-left turns twice and up-then-down drops the down
+    const TURNS = 2;
     function steer(name) {
       const d = DIRS[name]; if (!d || state !== 'running') return;
-      if (d[0] === -dir[0] && d[1] === -dir[1]) return;
-      next = d;
+      const last = turns.length ? turns[turns.length - 1] : dir;
+      if ((d[0] === -last[0] && d[1] === -last[1]) || (d[0] === last[0] && d[1] === last[1])) return;
+      if (turns.length < TURNS) turns.push(d);
     }
     // one step of the train: 'running', 'dropped' (a crash, and it came back in), 'won' or 'lost'
     function step() {
       if (state !== 'running') return state;
-      dir = next;
+      if (turns.length) dir = turns.shift();
       const [hx, hy] = train[0], nx = hx + dir[0], ny = hy + dir[1], k = key(nx, ny);
       if (!hop && nx === port[0] && ny === port[1]) { train.unshift([nx, ny]); state = 'won'; return state; }
       const grows = hop && nx === hop[0] && ny === hop[1];

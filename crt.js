@@ -23,6 +23,9 @@
     dfok: { color: '#b8f0c2', glow: '#b8f0c2' }, dfw: { color: '#ffffff', glow: '#ffffff' },
     // the night supervisor: a tag in inverse red, and their words in red; nothing else on the tube is red
     'sup-tag': { color: '#22308f', bg: '#ff9d9d', glow: 'none' }, sup: { color: '#ffb4b4', glow: '#ff7a7a' }, 'sup-dim': { color: '#ffb4b4', glow: '#ff7a7a', alpha: .38 }, 'sup-time': { color: '#ffb4b4', glow: '#ff7a7a', alpha: .62 },
+    // Vigil, the company (2026-10-12, the playtest: its lines were lost among the commands): a system broadcast, an inverse bar
+    // across the tube, the glass's blue on a band of the bright phosphor; a message on several rows is one band
+    vigil: { color: '#22308f', bg: 'var(--term-text)', glow: 'none', bar: true }, 'vigil-dim': { color: '#22308f', bg: 'var(--term-text)', glow: 'none', bar: true, soft: .78 },
     'rs-won': { color: '#22308f', bg: '#b8f0c2', glow: 'none' }, 'rs-lost': { color: '#22308f', bg: '#ffd28a', glow: 'none' },
     // the kinds of trouble, in the tube's own tones and never red (red is the supervisor's and the strikes'): DOWN the
     // phosphor at its brightest, HOT amber (as its LED), STUCK violet, LOSS cyan
@@ -107,11 +110,16 @@
       OFF = top;
       const drawRow = (segs, y, x0 = PAD_X) => {
         let col = 0;
+        // a Vigil row: its band first, the tube's width; a message's own rows meet (segs.cont: not its first row), and two
+        // messages one under the other keep a hairline of the glass between them
+        const bar = segs.find(s => s.text && String(s.cls || '').split(' ').some(c => CLS[c]?.bar));
+        if (bar) { const st = CLS[String(bar.cls).split(' ').find(c => CLS[c]?.bar)], gap = segs.cont ? 0 : 2; f.globalAlpha = 1; f.shadowBlur = 0; f.fillStyle = resolve(st.bg, pal); f.fillRect(x0 - CW * .6, y - LH / 2 + gap, W - 2 * PAD_X + CW * 1.2, LH - gap); }
         for (const s of segs) {
           if (!s.text) continue;
           const st = Object.assign({}, ...String(s.cls || '').split(' ').map(c => CLS[c] || {})), x = x0 + col * CW;
           f.globalAlpha = st.alpha ?? 1;
-          if (st.bg) { f.shadowBlur = 0; f.fillStyle = resolve(st.bg, pal); f.fillRect(x, y - LH / 2 + 1, s.text.length * CW, LH - 2); }
+          if (st.bar) f.globalAlpha = st.soft ?? 1;
+          if (st.bg && !st.bar) { f.shadowBlur = 0; f.fillStyle = resolve(st.bg, pal); f.fillRect(x, y - LH / 2 + 1, s.text.length * CW, LH - 2); }
           f.fillStyle = resolve(st.color, pal) || pal.text;
           f.shadowColor = st.glow === 'none' ? 'transparent' : st.glow || pal.glow; f.shadowBlur = st.glow === 'none' ? 0 : 6 * K;
           f.fillText(s.text, x, y);
@@ -197,6 +205,8 @@
       });
       // (after the rest, if it fits before the tube's edge)
       if (strip.note) { const n = '   ' + strip.note; if (x + f.measureText(n).width <= W - PAD_X) put(n, pal.dim); }
+      // a cartridge handed over, until it is taken out of the case (2026-10-12: an unlock went unnoticed)
+      if (strip.carts?.length) { const n = `   new cart${strip.carts.length > 1 ? 's' : ''} in the drawer: ${strip.carts.join(', ')}`; if (x + f.measureText(n).width <= W - PAD_X) put(n, pal.dim); else { const m = '   new cart in the drawer.'; if (x + f.measureText(m).width <= W - PAD_X) put(m, pal.dim); } }
       // a canister waiting in the receiver, until it is collected (the dry run: a stranger looked at the ceiling for it)
       if (strip.tube) { const n = '   something in the tube.'; if (x + f.measureText(n).width <= W - PAD_X) put(n, pal.dim); }
     }

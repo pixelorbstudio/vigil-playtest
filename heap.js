@@ -36,7 +36,10 @@
     const cells = (p = piece) => turned(p.name, p.r).map(([x, y]) => [p.x + x, p.y + y]);
     const fits = p => cells(p).every(([x, y]) => x >= 0 && x < COLS && y < ROWS && (y < 0 || !grid[y][x]));
     function spawn() {
-      piece = { name: queued, r: 0, x: 3, y: -1 }; count++;
+      // (wholly in the well from the moment it comes in, its top row on the well's first: it came in a row higher, half of
+      // it above the well, and you couldn't see what it was; the playtest, 2026-10-12). It waits a row's fall there before it
+      // falls, so it reaches the heap when it did when it came in a row higher.
+      piece = { name: queued, r: 0, x: 3, y: -Math.min(...turned(queued, 0).map(c => c[1])) }; count++; sinceFall -= fall;
       queued = next();
       if (!fits(piece)) { state = 'lost'; return; }
     }

@@ -128,7 +128,9 @@
   // 2026-10-06, item 4: the worst unit took 7 to 9 tries a night, each one another loss); its strike clock doesn't run
   // meanwhile, since the wait is the game's, not the player's
   // (DEFRAG's is half that: playtest round 4, 2026-10-10, a minute after a lost DEFRAG read as the game gone; ROUTE's stays)
-  const COOL_MS = 60000, COOL = { STUCK: 30000 };
+  // (2026-10-12, the playtest of shifts 1 and 2: every cartridge's wait is 10 real seconds, DEFRAG, ROUTE, HEAP, FIREWALL; a
+  // wait of half a minute or more read as the game taken away)
+  const COOL_MS = 10000, COOL = {};
 
   /* How hard the night is (decided with Arnold 2026-09-29: it should be hard, and ramp up night after night the
      way the story does). A returning player knows the room and fixes things faster, so each night is tuned harder
@@ -482,10 +484,17 @@
     }
     // how hard ROUTE plays at this hour (route-audit.js): more hops, more dead links, a faster train; night 3 more so.
     // The night's first game is the page's to make easy (teach).
-    function routeDial() {
+    // (2026-10-12, the playtest of shifts 1 and 2: a tester lost five in a row from 04:24, a rack down 72 minutes. The late
+    // dial eased, ending at 02:30's old setting, 8 hops, 6 dead links, 140 ms, where it ended at 9, 8, 130; and every game lost
+    // on the rack eases the next one a step, back toward the night's first settings, so a struggling player recovers: a hop
+    // fewer, two dead links fewer, the train 10 ms slower a step, at most three steps, never easier than 5, 0, 170, the
+    // teaching game. A win clears it (the trouble is gone). route-audit.js prints both.)
+    const ROUTE_EASE = { hops: 1, dead: 2, tick: 10, most: 3 };
+    function routeDial(unit) {
       const t = s.t + L.dial.ahead, u = Math.max(0, Math.min(1, (t - DIAL_FROM) / (330 - DIAL_FROM)));
-      const late = LEVELS.indexOf(L) === 2 ? 1 : 0;
-      return { hops: Math.round(6 + 3 * u) + late, dead: Math.round(2 + 6 * u) + 2 * late, tick: Math.round(160 - 30 * u) - 5 * late };
+      const late = LEVELS.indexOf(L) === 2 ? 1 : 0, k = Math.min(ROUTE_EASE.most, (unit && s.open.get(unit)?.tries) || 0);
+      return { hops: Math.max(5, Math.round(6 + 2 * u) + late - k * ROUTE_EASE.hops), dead: Math.max(0, Math.round(2 + 4 * u) + 2 * late - k * ROUTE_EASE.dead),
+        tick: Math.min(170, Math.round(160 - 20 * u) - 5 * late + k * ROUTE_EASE.tick), eased: k };
     }
     // a fix lands: a reboot or reroute pays a little back, a cartridge win (a stuck unit freed) is a second wind
     // theirs: a fix someone else typed on your keys (aw's, night 2): the unit is back, and nothing of it is yours: no refund,
@@ -543,6 +552,9 @@
       s.stats.incidents++;
       return { type: 'incident', unit, kind };
     }
+    // a small trouble for the lull (app.js LULL, 2026-10-12: no real minute of dead air in night 1's long stretches): the
+    // kind the night has already shown you, HOT if you have met it, else DOWN, on a unit the page picks
+    function lull(unit) { return inject(unit, s.seen.has('HOT') ? 'HOT' : 'DOWN'); }
     function find(cart) { if (s.found.has(cart)) return null; const events = []; reveal(cart, 'dev', events); return events[0]; }
     function useBean() { if (s.beans <= 0) return false; s.beans--; return true; }
     // beans in (a delivery, Glenn's bag): the page plays the tube's chirp for it (app.js giveBeans)
@@ -570,7 +582,7 @@
       // is (playing), and what is left of it spent when it ends (settle); its win and loss are the page's (paidBack, spend)
       play: key => { s.playing.set(key, CART.play); s.idle = 0; }, settle,
       get lastQuick() { return !!s.lastQuick; },
-      tick, fix, finish, failed, hold, won, offer, heapDial, firewallDial, handOver, poke, rest, paidBack, drainFactor, defragDial, routeDial, drink, spend, setStrain, useBean, addBeans, inject, find, clock, uptime, report,
+      tick, fix, finish, failed, hold, won, offer, heapDial, firewallDial, handOver, poke, rest, paidBack, drainFactor, defragDial, routeDial, drink, spend, setStrain, useBean, addBeans, inject, lull, find, clock, uptime, report,
       get t() { return s.t; }, get over() { return s.over; }, get ending() { return s.ending; },
       get strikes() { return s.strikes; }, get energy() { return s.energy; }, get beans() { return s.beans; }, get playing() { return s.playing.size > 0; },
       get flow() { return s.flow; }, get offered() { return OFFER ? OFFER.cart : null; }, get kinds() { return [...s.kinds]; }, get held() { return [...s.holds]; }, MASTERY, FLOW, GRACE,
