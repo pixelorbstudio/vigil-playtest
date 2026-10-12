@@ -60,6 +60,13 @@
     // the glass's bottom, as frames always drew one row more than the shell)
     const layout = n => ({ top: workTop(n), rows: Math.floor((H - BOTTOM - workTop(n)) / LH), frameRows: Math.floor((H - 4 - workTop(n)) / LH),
       cols: n === 3 ? COLS - PANE.ICON : COLS });
+    // where a box of rows (the menu's) sits: its left and top (design units), centred on the whole glass, never above the
+    // first row (TOP); not snapped to the text's columns, whose spare room is all on the right. BW: its width in cells. The
+    // page's clicks on it go through the same
+    const boxAt = box => {
+      const BW = box[0].reduce((n, s) => n + [...s.text].length, 0);
+      return { x0: Math.max(PAD_X, (W - BW * CW) / 2), y0: Math.max(TOP, (H - box.length * LH) / 2), BW };
+    };
     const css = () => { const s = getComputedStyle(host); return { text: s.getPropertyValue('--term-text').trim() || '#e9edff', dim: s.getPropertyValue('--term-dim').trim() || '#aab4ee', glow: s.getPropertyValue('--term-glow').trim() || 'rgba(200,210,255,.45)' }; };
     const resolve = (c, pal) => c === 'var(--term-dim)' ? pal.dim : c === 'var(--term-text)' ? pal.text : c;
 
@@ -98,12 +105,11 @@
       }
       const top = view.pane ? workTop(view.pane.n) : TOP;
       OFF = top;
-      view.rows.forEach((segs, r) => {
-        const y = top + r * LH + LH / 2;
+      const drawRow = (segs, y, x0 = PAD_X) => {
         let col = 0;
         for (const s of segs) {
           if (!s.text) continue;
-          const st = Object.assign({}, ...String(s.cls || '').split(' ').map(c => CLS[c] || {})), x = PAD_X + col * CW;
+          const st = Object.assign({}, ...String(s.cls || '').split(' ').map(c => CLS[c] || {})), x = x0 + col * CW;
           f.globalAlpha = st.alpha ?? 1;
           if (st.bg) { f.shadowBlur = 0; f.fillStyle = resolve(st.bg, pal); f.fillRect(x, y - LH / 2 + 1, s.text.length * CW, LH - 2); }
           f.fillStyle = resolve(st.color, pal) || pal.text;
@@ -111,7 +117,8 @@
           f.fillText(s.text, x, y);
           col += [...s.text].length;
         }
-      });
+      };
+      view.rows.forEach((segs, r) => drawRow(segs, top + r * LH + LH / 2));
       f.globalAlpha = 1;
       // hair rules between rows (Glenn's log: between his messages), at the top of each listed row, the pane's rule's ink
       if (view.rules) { f.shadowBlur = 0; f.globalAlpha = .3; f.fillStyle = pal.dim; for (const r of view.rules) f.fillRect(PAD_X, Math.round(top + r * LH) - .5, W - 2 * PAD_X, 1); f.globalAlpha = 1; }
@@ -130,6 +137,15 @@
       f.restore();
       if (view.pane) drawPane(view.pane, pal);
       if (view.status) drawStatus(view.status, pal);
+      // the menu's box (tubeMenu), over everything under the status line, Glenn's pane too: centred on the whole tube, not on
+      // the work's rows (under the open pane they start three rows down, and the box ran off the glass's bottom); its cells
+      // are cleared first, so nothing under it shows through
+      if (view.box) {
+        const { x0, y0, BW } = boxAt(view.box);
+        f.globalAlpha = 1; f.clearRect(x0, y0, BW * CW, view.box.length * LH);
+        view.box.forEach((segs, r) => drawRow(segs, y0 + r * LH + LH / 2, x0));
+        f.globalAlpha = 1;
+      }
       bend();
     }
     // the status line: "energy", a gauge, the percentage, a bean and the bean count, right-aligned at the top; and,
@@ -593,6 +609,6 @@ void main() {
     })();
     // (for the audit: draw the last view again with the strips or with WebGL, and read the tube's pixels)
     const bendAudit = { set: m => { bendMode = m; lastKey = null; }, get mode() { return bendMode; }, gl: () => gl.ready() || gl.why };
-    return { paint, layout, COLS, ROWS, CW, LH, TOP, PAD_X, PANE, W, H, mailHit: () => mailHit, titleHit: () => titleHits, setK, get K() { return K; }, bendAudit };
+    return { paint, layout, boxAt, COLS, ROWS, CW, LH, TOP, PAD_X, PANE, W, H, mailHit: () => mailHit, titleHit: () => titleHits, setK, get K() { return K; }, bendAudit };
   };
 })();

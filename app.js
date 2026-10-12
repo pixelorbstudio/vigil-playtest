@@ -5950,14 +5950,16 @@
         rows = all.slice(start, end);
         if (cursor) cursor = scrollBack ? null : { row: cursor.row - start, col: cursor.col };
       }
-      // the menu (tubeMenu): a box laid over whatever the tube shows, its own cells replacing those under it; the game's
-      // grid (ROUTE's) is left out while it is up, and there is no cursor
+      // the menu (tubeMenu): a box laid over whatever the tube shows, its own cells replacing those under it (crt draws it,
+      // centred on the whole tube, Glenn's pane included); the game's grid (ROUTE's) is left out while it is up, and there
+      // is no cursor
       if (frame && overTop !== null) { rows = rows.slice(); rows[0] = runsOf(overTop); }
-      if (menuBox) { rows = boxOver(rows, menuBox.map(runsOf)); cursor = null; }
+      const box = menuBox ? menuBox.map(runsOf) : null;
+      if (box) cursor = null;
       const pv = paneView(n);
-      crt.paint({ rows, cursor, cursorOn, status, pane: pv, field: frame && !menuBox ? field : null, rules: frame && !menuBox ? frameRules : null,
+      crt.paint({ rows, cursor, cursorOn, status, pane: pv, box, field: frame && !menuBox ? field : null, rules: frame && !menuBox ? frameRules : null,
         burn: piece(3) ? clamp((.35 - room.brightness) / .35, 0, 1) : 0, burnText: 'm@vigil:~$' });
-      setOut([...(pv ? pv.rows.map(r => r.segs.map(x => x.text).join('') + (r.time ? ' ' + r.time : '')) : []), ...rows.map(r => r.map(x => x.text).join(''))].join('\n'));   // for screen readers
+      setOut((box ? box : [...(pv ? pv.rows.map(r => [{ text: r.segs.map(x => x.text).join('') + (r.time ? ' ' + r.time : '') }]) : []), ...rows]).map(r => r.map(x => x.text).join('')).join('\n'));   // for screen readers
     }
     // ---- Glenn's pane (design.md section 5, "Surface and focus, decided", 5, and Arnold's two changes, 2026-10-10). Three
     // rows under the problem strip: his newest message on the second and third under his tag (up to two full rows, never
@@ -6087,18 +6089,6 @@
     }
     // the menu's box over the rows: centred across, and a little above the middle
     let menuBox = null, titleView = null;
-    function boxOver(rows, box) {
-      const BW = lenOf(box[0]), c0 = Math.max(0, Math.floor((crt.COLS - BW) / 2)), r0 = Math.max(0, Math.floor((crt.ROWS - box.length) / 2) - 1);
-      const out = rows.slice(); while (out.length < r0 + box.length) out.push([]);
-      const cells = row => { const c = []; for (const r of row) for (const ch of r.text) c.push({ ch, cls: r.cls }); return c; };
-      const runs = c => { const row = []; for (const { ch, cls } of c) { const p = row[row.length - 1]; if (p && p.cls === cls) p.text += ch; else row.push({ text: ch, cls }); } return row; };
-      box.forEach((b, i) => {
-        const c = cells(out[r0 + i] || []); while (c.length < c0) c.push({ ch: ' ' });
-        c.splice(c0, BW, ...cells(b));
-        out[r0 + i] = runs(c);
-      });
-      return out;
-    }
     // the cursor blinks, and the wheel over the tube scrolls back through what has been said
     setInterval(() => { cursorOn = !cursorOn; if (!frame) render(); }, 525);
     // (over Glenn's rows, it scrolls his pane instead)
@@ -8446,8 +8436,8 @@
         }
         const [tx, ty] = toTerminal(e.clientX, e.clientY);
         const x = tx / 2, y = (ty - (WARP.top[Math.round(tx)] || 0)) / 2;
-        const BW = lenOf(runsOf(menuBox[0])), c0 = Math.max(0, Math.floor((crt.COLS - BW) / 2)), r0 = Math.max(0, Math.floor((crt.ROWS - menuBox.length) / 2) - 1);
-        const row = Math.floor((y - crt.TOP) / crt.LH) - r0, col = Math.floor((x - crt.PAD_X) / crt.CW) - c0;
+        const { x0, y0, BW } = crt.boxAt(menuBox.map(runsOf));
+        const row = Math.floor((y - y0) / crt.LH), col = Math.floor((x - x0) / crt.CW);
         return row >= 0 && row < menuBox.length && col >= 0 && col < BW ? row : null;
       },
       board: script => runBoard(script),               // (04:44 opens the board by itself)
@@ -8512,6 +8502,7 @@
     const pad = t => t + ' '.repeat(Math.max(0, IN - [...t].length));
     const row = (t = '', cls) => ({ html: '|' + (cls ? `<span class="${cls}">${escH(pad(t))}</span>` : escH(pad(t))) + '|' });
     const bar = { text: '+' + '-'.repeat(IN) + '+' };
+    const mid = t => ' '.repeat(Math.round((IN - [...t].length) / 2)) + t;   // a title centred in the box
     const switches = () => [...RECOMMENDED.filter(n => PACKS[n]), ...SIG_NAMES.filter(n => !RECOMMENDED.includes(n))];
     const SW_ROWS = 3;                                 // (3, with the hum and the key sounds above them: the box as tall as it was)
     // each page's choices: { label, act }, a switch, or the volume
@@ -8550,7 +8541,7 @@
       lineItem = [];
       const choice = (i, text) => { lineItem[lines.length] = i; lines.push(i === sel ? row(' > ' + text, 'dg-cur') : row('   ' + text)); };
       if (page === 'main') {
-        lines.push(row('              P A U S E D'), row());
+        lines.push(row(mid('P A U S E D')), row());
         L.forEach((it, i) => choice(i, it.label + (it.label === 'save playtest log' && saved ? '   saved.' : '')));
         // (a night left halfway is played again from 23:00: the story audit, 2026-10-06; "progress saves automatically" alone
         // was false for it)
@@ -8562,7 +8553,7 @@
         lines.push(row(), row('   esc: resume', 'dim'));
       } else {
         const sw = switches(), filled = Math.round(volume * 20);
-        lines.push(row('           S E T T I N G S'));
+        lines.push(row(mid('S E T T I N G S')));
         choice(0, `volume   ${'█'.repeat(filled)}${'░'.repeat(20 - filled)} ${String(Math.round(volume * 100)).padStart(3)}%`);
         // (the hum and the key sounds: buttons on the page, outside the room, until the dry run, 2026-10-11)
         choice(1, `hum          ${hum.on ? 'on' : 'off'}`);
