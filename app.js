@@ -424,7 +424,17 @@
     const cover = on => { covered = !!on; $('night-over').classList.toggle('shut', covered); draw(); };
     // (drawn once nearly shut while the page is still black, the start's close-up not yet shown: the GPU readies what it draws
     // the lids with then, not in the first blink, where it cost a frame of 50 to 160 ms; the final sweep's live audit)
-    const warm = async () => { if (up < 1 || down < 1) return; set(.04, .04); await new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r))); if (up === .04 && down === .04) set(1, 1); };
+    // (the lids drawn, then the whole canvas filled with their black over them, so the GPU readies the lids and the frame shows
+    // nothing: the page isn't always black then, and the room showed through the slit for a few frames, squeezed, before the
+    // close-up (Arnold, 2026-10-12: every new shift, the page under load presenting the frame late). A black background on the
+    // canvas didn't do: the room's flight copies are layers of their own and showed through it.)
+    const warm = async () => {
+      if (up < 1 || down < 1) return;
+      set(.04, .04);
+      cx2.save(); cx2.setTransform(1, 0, 0, 1, 0, 0); cx2.globalCompositeOperation = 'source-over'; cx2.globalAlpha = 1; cx2.fillStyle = LID.fill; cx2.fillRect(0, 0, el.width, el.height); cx2.restore();
+      await new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r)));
+      if (up === .04 && down === .04) set(1, 1);
+    };
     return { set, to, blink, droop, blinkAt, lens, LID, cover, warm, play, TRACK,
       close: () => play(TRACK.close), open: (scale = 1) => play(TRACK.open, { scale }), wake: () => play(TRACK.wake), sleep: (scale = 1) => play(TRACK.sleep, { scale }),
       comeTo: hold => play(TRACK.comeTo(hold)), shut: () => { run++; set(0, 0); }, get state() { return [up, down]; } };
@@ -3222,7 +3232,14 @@
   }
   window.__mailChime = () => mailChime();             // (for the sound audit)
   // CRT power: a low "bwomp" collapsing down on off, a rising hum on warm-up
+  // (a recording when there is one, Arnold's to choose (2026-10-12: a CRT turning on, for the start too): crt-on and crt-off in
+  // assets/sounds/fx; until then the thump made here, as it always was at the knob)
   function degauss(on) {
+    if (muted) return;
+    fxBuffer(on ? 'crt-on' : 'crt-off').then(buf => buf ? playFx(on ? 'crt-on' : 'crt-off', .6, 0) : degaussMade(on));
+    detent(on);
+  }
+  function degaussMade(on) {
     if (muted) return;
     const ctx = ac(), t = ctx.currentTime;
     const o = ctx.createOscillator(); o.type = 'sine';
@@ -3235,7 +3252,6 @@
       g.gain.setValueAtTime(.3, t); g.gain.exponentialRampToValueAtTime(.001, t + .6);
     }
     o.connect(g).connect(ctx.destination); o.start(t); o.stop(t + 1.4);
-    detent(on);
   }
   // the power knob's detent: a short bright snap and a small low knock, not a keyboard switch. (It used to
   // call the key click, which became a recorded keystroke when key sounds moved to recorded packs.)
@@ -3479,6 +3495,22 @@
     const lensG = g.querySelector('.cam-lens'), lampEl = g.querySelector('.cam-lamp');
     const st = C.create((Date.now() % 100000) + 1);
     let drawn = null, last = performance.now();
+    // (the lens drawn at once, where it rests: the frames below draw nothing while the start is up, and the start's flight copies
+    // the ceiling as it is then, so it flew without one; Arnold, 2026-10-12)
+    lensG.innerHTML = C.lensSvg(st.ang, st.focus); drawn = [st.ang[0], st.ang[1], st.focus];
+    // A flutter (Arnold, 2026-10-12): as the start's camera pulls back and the ceiling camera comes into view, its lens
+    // focuses on you, quickly, twice: the refocus's own shrink (FOCUS.k) and back, then half of it and back, eased. Only
+    // smaller, never bigger than at rest. el: the lens to draw it on (the start's flight copy of it while that is what shows).
+    const FLUTTER = [[0, 1], [110, C.FOCUS.k], [200, .97], [290, .92], [520, 1]];
+    function flutter(el = lensG) {
+      const t0 = performance.now(), end = FLUTTER[FLUTTER.length - 1][0];
+      (function frame(now) {
+        const t = Math.min(end, now - t0); let i = 0; while (i < FLUTTER.length - 2 && t > FLUTTER[i + 1][0]) i++;
+        const [ta, fa] = FLUTTER[i], [tb, fb] = FLUTTER[i + 1], u = Math.min(1, (t - ta) / (tb - ta)), e = u * u * (3 - 2 * u);
+        el.innerHTML = C.lensSvg(st.ang, fa + (fb - fa) * e);
+        if (t < end) requestAnimationFrame(frame);
+      })(t0);
+    }
     const lit = new Map();                            // reason -> its timer (or true): lit while any reason stands
     let flash = false;                                // a blink (a click on it): the lamp the other way for a moment
     function showLamp() { lampEl.setAttribute('fill', !!lit.size !== flash ? C.TONE.lampOn : C.TONE.lampOff); }
@@ -3630,7 +3662,7 @@
       hover = over;
       if (e.target === zones.up) { look.peek = over ? 0 : -30; aim(); }
     }, { passive: true });
-    return { turn, lamp, shutter, saw, kill, refocus: refocusNow, blink, clicked, onCam, get hover() { return hover; }, get blind() { return blind; }, set blind(v) { blind = !!v; }, get state() { return st; }, get lit() { return [...lit.keys()]; }, el: g, lampEl, SHUTTER };
+    return { turn, lamp, shutter, saw, kill, flutter, refocus: refocusNow, blink, clicked, onCam, get hover() { return hover; }, get blind() { return blind; }, set blind(v) { blind = !!v; }, get state() { return st; }, get lit() { return [...lit.keys()]; }, el: g, lampEl, SHUTTER };
   })();
 
   // ------------------------------------------------------------ 04:44
@@ -8901,6 +8933,7 @@
       const mc = flight?.layers.find(f => f.z === 'monitor')?.svg, ms = mc?.querySelector('#' + screenG.id), mf = ms?.querySelector('svg path:nth-of-type(2)');
       if (mf) { mf.style.transition = face.style.transition; ms.classList.remove('off'); }
       terminal.classList.add('warm-brief'); setTimeout(() => terminal.classList.remove('warm-brief'), 500);
+      playFx('crt-on', .6, 0);                       // (the tube coming on: the recording when there is one, silent till then)
       terminal.style.willChange = 'auto';             // (scaled, the tube's layer is drawn again at each size, not a texture stretched)
       fly(); unpark();
       let rested = false;
@@ -8913,9 +8946,16 @@
       const handBack = () => { if (handed) return; handed = true; catcher.style.display = 'none'; document.body.classList.remove('title'); face.style.transition = ''; playtest('start: the camera settled'); };
       setTimeout(() => eyes.comeTo(() => Promise.all([wait(250), settle()])).then(handBack), SEQ.blink * 1000);
       let prevT = 0; frameMs = [];
+      // (the ceiling camera's lens flutters a beat after it comes into the window: cam.flutter, on the flight's copy of it)
+      const camLens = flight?.layers.find(f => f.z === 'ceiling')?.svg.querySelector('.cam-lens') || cam?.el.querySelector('.cam-lens');
+      // (in view: its middle in the window and not behind the monitor, which covers the window at the close-up)
+      const camBezel = flight?.layers.find(f => f.z === 'monitor')?.svg.querySelector('#bezel') || $('bezel');
+      let camSeen = false;
       (function tick() {
         const now = performance.now(), s = (now - pullAt) / 1000;
         if (prevT) { frameMs.push(now - prevT); if (frameMs.length > 40) frameMs.shift(); } prevT = now;
+        if (!camSeen && camLens) { const r = camLens.getBoundingClientRect(), b = camBezel?.getBoundingClientRect(), mx = (r.left + r.right) / 2, my = (r.top + r.bottom) / 2;
+          if (r.width && my > 0 && my < innerHeight && mx > 0 && mx < innerWidth && !(b && mx > b.left && mx < b.right && my > b.top && my < b.bottom)) { camSeen = true; playtest(`start: the camera in view (${s.toFixed(2)} s)`); setTimeout(() => cam?.flutter(camLens), 200); } }
         if (s >= SEQ.pull[1]) { pose(SEQ.pull[1]); return; }
         pose(s); requestAnimationFrame(tick);
       })();
