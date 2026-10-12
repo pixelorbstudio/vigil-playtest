@@ -1,0 +1,3 @@
+# Sound effects in this folder
+
+- **crt-on.wav**: the first half second of "CRT TV Switches On" by Fission9 (https://freesound.org/people/Fission9/sounds/693860/), a 14-inch PAL television switching on: the switch's snap and the degauss's ring, cut before the line whine (from 0.215 s, 0.5 s long, 3 ms fade in, 0.22 s fade out), mono, 7 dB down so it plays at -37.8 dBA in the page (a keystroke -36.2, the hum -51.9; audit-sound.js's meter). Licence: Creative Commons 0 (public domain): no attribution required. Chosen 2026-10-12 for the start's tube coming on and the power knob ("a display flick").
